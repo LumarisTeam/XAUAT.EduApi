@@ -283,7 +283,7 @@ public class CourseServiceTests
     }
 
     [Fact]
-    public async Task GetCoursesAsync_ShouldReturnEmptyList_WhenApiReturnsEmptyCourses()
+    public async Task GetCoursesAsync_ShouldThrowInvalidOperationException_WhenApiReturnsEmptyCourses()
     {
         var studentId = "123456";
         var cookie = "test-cookie";
@@ -314,10 +314,8 @@ public class CourseServiceTests
         _httpClientFactoryMock.Setup(x => x.CreateClient(It.IsAny<string>()))
             .Returns(() => new HttpClient(handlerMock.Object, disposeHandler: false));
 
-        var result = await _courseService.GetCoursesAsync(studentId, cookie);
-
-        Assert.NotNull(result);
-        Assert.Empty(result);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _courseService.GetCoursesAsync(studentId, cookie));
     }
 
     [Fact]
