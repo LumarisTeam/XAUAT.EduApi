@@ -127,6 +127,7 @@ public static class ServiceCollectionExtensions
             services.AddScoped<IElectricityService, ElectricityService>();
             services.AddScoped<IElectricitySubscriptionService, ElectricitySubscriptionService>();
             services.AddScoped<IElectricityNotificationEmailService, ElectricityNotificationEmailService>();
+            services.AddSingleton<IScheduleTimeService, ScheduleTimeService>();
             services.AddSingleton<IStudentRateLimitState, StudentRateLimitState>();
             services.AddScoped<IStudentRateLimitExecutor, StudentRateLimitExecutor>();
             services.AddScoped<EduCrawlerRateLimitFilter>();
