@@ -1,4 +1,4 @@
-﻿namespace EduApi.Data.Models;
+namespace EduApi.Data.Models;
 
 public class CourseResponse
 {
@@ -32,5 +32,15 @@ public class CourseActivity
     public string Credits { get; set; } = "";
     public string LessonId { get; set; } = "";
 
-    // 根据需要添加其他属性
+    /// <summary>
+    /// 课程开始时间（根据节次自动计算）
+    /// 格式：HH:mm
+    /// </summary>
+    public string StartTime { get; set; } = "";
+
+    /// <summary>
+    /// 课程结束时间（根据节次自动计算）
+    /// 格式：HH:mm
+    /// </summary>
+    public string EndTime { get; set; } = "";
 }

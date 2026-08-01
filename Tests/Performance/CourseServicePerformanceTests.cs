@@ -59,6 +59,7 @@ public class CourseServicePerformanceTests
                 key, factory, expiration, level, priority, token, isUse) => await factory());
 
         var infoService = new InfoService();
+        var classTimeService = new ClassTimeService();
 
         // 创建课程服务
         _courseService = new CourseService(
@@ -66,7 +67,8 @@ public class CourseServicePerformanceTests
             _loggerMock.Object,
             _examServiceMock.Object,
             _cacheServiceMock.Object,
-            infoService);
+            infoService,
+            classTimeService);
     }
 
     /// <summary>

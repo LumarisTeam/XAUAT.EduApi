@@ -92,7 +92,7 @@ public class FullStudentFlowIntegrationTests : IDisposable
             _httpClientFactoryMock.Object,
             courseLogger,
             _examServiceMock.Object,
-            _cacheServiceMock.Object, _infoService);
+            _cacheServiceMock.Object, _infoService, new ClassTimeService());
 
         // 创建支付服务
         _paymentService = new PaymentService(

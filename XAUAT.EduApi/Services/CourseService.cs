@@ -17,6 +17,7 @@ public class CourseService(
     IExamService examService,
     ICacheService cacheService,
     IInfoService infoService,
+    IClassTimeService classTimeService,
     ITestAccountResolver? testAccountResolver = null,
     ITestDataProvider? testDataProvider = null,
     IStudentRateLimitExecutor? rateLimitExecutor = null)
@@ -24,6 +25,7 @@ public class CourseService(
 {
     private readonly IStudentRateLimitExecutor _rateLimitExecutor =
         rateLimitExecutor ?? NoOpStudentRateLimitExecutor.Instance;
+    private readonly IClassTimeService _classTimeService = classTimeService;
 
     public async Task<List<CourseActivity>> GetCoursesAsync(string studentId, string cookie, string language = "zh")
     {
@@ -75,6 +77,10 @@ public class CourseService(
         {
             item.WeekIndexes = item.WeekIndexes.OrderBy(x => x).ToList();
             item.Room = string.IsNullOrEmpty(item.Room) ? "未知" : item.Room.Replace("*", "");
+            
+            // 根据校区和节次计算课程时间
+            item.StartTime = _classTimeService.GetStartTime(item.Campus, item.StartUnit);
+            item.EndTime = _classTimeService.GetEndTime(item.Campus, item.EndUnit);
         }
 
         return courses;

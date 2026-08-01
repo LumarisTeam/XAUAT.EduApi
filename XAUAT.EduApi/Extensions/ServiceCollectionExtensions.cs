@@ -116,6 +116,7 @@ public static class ServiceCollectionExtensions
             services.AddScoped<IProgramService, ProgramService>();
             services.AddScoped<IInfoService, InfoService>();
             services.AddScoped<IPaymentService, PaymentService>();
+            services.AddSingleton<IClassTimeService, ClassTimeService>();
             services.AddScoped<ICourseService, CourseService>();
             services.AddScoped<IScoreService, ScoreService>();
             services.AddScoped<IBusService, BusService>();
