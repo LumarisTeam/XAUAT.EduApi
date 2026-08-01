@@ -14,6 +14,7 @@ public class EduContext(DbContextOptions<EduContext> options) : DbContext(option
     public DbSet<ElectricityNotificationLog> ElectricityNotificationLogs { get; set; }
     public DbSet<MapPoiModel> MapPois { get; set; }
     public DbSet<ExamRecord> ExamRecords { get; set; }
+    public DbSet<TeacherCommentModel> TeacherComments { get; set; }
     
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -59,6 +60,18 @@ public class EduContext(DbContextOptions<EduContext> options) : DbContext(option
             entity.HasIndex(e => new { e.StudentId, e.ExamTime });
         });
 
+        modelBuilder.Entity<TeacherCommentModel>(entity =>
+        {
+            entity.HasIndex(e => e.StudentId);
+            entity.HasIndex(e => e.TeacherName);
+            entity.HasIndex(e => e.Status);
+            entity.HasIndex(e => new { e.TeacherName, e.Status });
+            entity.Property(e => e.CreatedOn).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.Star).HasDefaultValue(5);
+            entity.Property(e => e.Status).HasDefaultValue(CommentReviewStatus.Pending);
+            entity.Property(e => e.AiVerdict).HasDefaultValue(AiReviewVerdict.None);
+        });
+
         base.OnModelCreating(modelBuilder);
     }
 }
@@ -71,7 +84,15 @@ public class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<EduContext
         var optionsBuilder = new DbContextOptionsBuilder<EduContext>();
         var sqlConnectionString = Environment.GetEnvironmentVariable("SQL");
 
-        optionsBuilder.UseNpgsql(sqlConnectionString);
+        if (string.IsNullOrEmpty(sqlConnectionString))
+        {
+            optionsBuilder.UseSqlite("Data Source=Data.db",
+                o => o.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery));
+        }
+        else
+        {
+            optionsBuilder.UseNpgsql(sqlConnectionString);
+        }
 
         return new EduContext(optionsBuilder.Options);
     }
