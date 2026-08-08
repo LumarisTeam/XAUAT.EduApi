@@ -84,7 +84,6 @@ public static class ServiceCollectionExtensions
             services.AddScoped<IExamRepository, ExamRepository>();
             services.AddScoped<IElectricitySubscriptionRepository, ElectricitySubscriptionRepository>();
             services.AddScoped<IMapPoiRepository, MapPoiRepository>();
-            services.AddScoped<ITeacherCommentRepository, TeacherCommentRepository>();
 
             return services;
         }
@@ -129,7 +128,6 @@ public static class ServiceCollectionExtensions
             services.AddScoped<IElectricityService, ElectricityService>();
             services.AddScoped<IElectricitySubscriptionService, ElectricitySubscriptionService>();
             services.AddScoped<IElectricityNotificationEmailService, ElectricityNotificationEmailService>();
-            services.AddScoped<ITeacherCommentService, TeacherCommentService>();
             services.AddSingleton<IStudentRateLimitState, StudentRateLimitState>();
             services.AddScoped<IStudentRateLimitExecutor, StudentRateLimitExecutor>();
             services.AddScoped<EduCrawlerRateLimitFilter>();

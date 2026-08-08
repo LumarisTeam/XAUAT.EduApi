@@ -15,6 +15,3 @@ logs/
 .env
 
 .DS_Store
-
-# 签名密钥（本地生成，严禁入库）
-keys/
