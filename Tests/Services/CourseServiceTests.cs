@@ -33,14 +33,12 @@ public class CourseServiceTests
             .ReturnsAsync(new List<CourseActivity>());
 
         var infoService = new InfoService();
-        var classTimeService = new ClassTimeService();
         _courseService = new CourseService(
             _httpClientFactoryMock.Object,
             _loggerMock.Object,
             _examServiceMock.Object,
             _cacheServiceMock.Object,
-            infoService,
-            classTimeService);
+            infoService);
     }
 
     private void SetupPassThrough()
@@ -344,7 +342,6 @@ public class CourseServiceTests
             _examServiceMock.Object,
             _cacheServiceMock.Object,
             new InfoService(),
-            new ClassTimeService(),
             resolver.Object,
             provider.Object);
 

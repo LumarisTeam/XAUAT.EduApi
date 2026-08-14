@@ -31,18 +31,4 @@ public class CourseActivity
 
     public string Credits { get; set; } = "";
     public string LessonId { get; set; } = "";
-
-    /// <summary>
-    /// 课程开始时间（根据校区和节次自动计算）
-    /// 格式：HH:mm
-    /// </summary>
-    public string StartTime { get; set; } = "";
-
-    /// <summary>
-    /// 课程结束时间（根据校区和节次自动计算）
-    /// 格式：HH:mm
-    /// </summary>
-    public string EndTime { get; set; } = "";
-
-    // 根据需要添加其他属性
 }

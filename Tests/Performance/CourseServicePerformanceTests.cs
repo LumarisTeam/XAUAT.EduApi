@@ -67,8 +67,7 @@ public class CourseServicePerformanceTests
             _loggerMock.Object,
             _examServiceMock.Object,
             _cacheServiceMock.Object,
-            infoService,
-            classTimeService);
+            infoService);
     }
 
     /// <summary>

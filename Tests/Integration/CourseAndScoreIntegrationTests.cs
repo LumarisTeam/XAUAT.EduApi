@@ -91,8 +91,7 @@ public class CourseAndScoreIntegrationTests : IDisposable
             courseLogger,
             _examServiceMock.Object,
             cacheServiceMock.Object, 
-            infoService,
-            new ClassTimeService());
+            infoService);
 
         // 创建成绩仓库和服务
         var scoreLogger = new Mock<ILogger<ScoreService>>().Object;
