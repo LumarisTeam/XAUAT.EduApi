@@ -13,6 +13,12 @@ public class SemesterItem
     {
         return $"{Text}:{Value}";
     }
+
+    public static SemesterItem Default => new()
+    {
+        Value = "361",
+        Text = "2026-2027-1"
+    };
 }
 
 [Serializable]

@@ -457,15 +457,104 @@ public static class SemesterModelStatic
 
         if (matches.Count == 0) return new SemesterItem();
 
-        var text = matches.First().Groups[2].Value;
+        var match = matches.FirstOrDefault();
+        if (match == null) return new SemesterItem();
+
+        var text = match.Groups[2].Value;
 
         if (text == "" || text[^1] == '3')
         {
-            return new SemesterItem()
+            return SemesterItem.Default;
+        }
+
+        // 2026-2027-1
+        var textSplit = text.Split('-');
+
+        var timeModel = service.GetTime();
+
+        // 2026-9-1
+        var startTimeSplit = timeModel.StartTime.Split('-');
+
+        if (int.TryParse(startTimeSplit[1], out var semester) &&
+            int.TryParse(startTimeSplit[0], out var startTimeYear))
+        {
+            var num = -1;
+            var startYear = -1;
+            var endYear = -1;
+            if (textSplit.Length == 3)
             {
-                Value = "301",
-                Text = "2025-2026-1"
-            };
+                startYear = int.Parse(textSplit[0]);
+                endYear = int.Parse(textSplit[1]);
+                num = int.Parse(textSplit[2]);
+            }
+
+            if (num == -1 || startYear == -1 || endYear == -1)
+            {
+                return new SemesterItem();
+            }
+
+            // 如果月份大于 7，就是本年的秋季学期，例如 2026-2027-1
+            if (semester > 7)
+            {
+                if (num == 1 && startYear == startTimeYear)
+                {
+                    return new SemesterItem()
+                    {
+                        Value = matches.First().Groups[1].Value,
+                        Text = text
+                    };
+                }
+
+                var a = matches.FirstOrDefault(x =>
+                {
+                    if (x.Groups.Count < 2) return false;
+                    var semesters = x.Groups[2].Value.Split('-');
+                    if (semesters.Length < 2) return false;
+                    return semesters[0] == startTimeSplit[0].Trim('0');
+                });
+
+                if (a == null)
+                {
+                    return SemesterItem.Default;
+                }
+
+                return new SemesterItem()
+                {
+                    Value = a.Groups[1].Value,
+                    Text = a.Groups[2].Value
+                };
+            }
+            // 如果月份小于 7，就是本年的春季学期，例如 2026-2027-2
+            else
+            {
+                if (num == 2 && endYear == startTimeYear)
+                {
+                    return new SemesterItem()
+                    {
+                        Value = matches.First().Groups[1].Value,
+                        Text = text
+                    };
+                }
+                
+                var a = matches.FirstOrDefault(x =>
+                {
+                    if (x.Groups.Count < 2) return false;
+                    var semesters = x.Groups[2].Value.Split('-');
+                    if (semesters.Length < 2) return false;
+                    return semesters[1] == startTimeSplit[1].Trim('0');
+                });
+
+                if (a == null)
+                {
+                    return SemesterItem.Default;
+                }
+
+                return new SemesterItem()
+                {
+                    Value = a.Groups[1].Value,
+                    Text = a.Groups[2].Value
+                };
+            }
         }
 
         return new SemesterItem()

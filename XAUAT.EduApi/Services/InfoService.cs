@@ -2,11 +2,42 @@
 
 public interface IInfoService
 {
+    /// <summary>
+    /// 获取时间
+    /// </summary>
+    /// <returns></returns>
     TimeModel GetTime();
+    
+    /// <summary>
+    /// 是否大于开始时间
+    /// </summary>
+    /// <returns></returns>
     bool IsGreatThanStart();
+    
+    /// <summary>
+    /// 是否大于开始时间
+    /// </summary>
+    /// <param name="time"></param>
+    /// <returns></returns>
     bool IsGreatThanStart(int time);
+    
+    /// <summary>
+    /// 是否小于结束时间
+    /// </summary>
+    /// <returns></returns>
     bool IsLessThanEnd();
+    
+    /// <summary>
+    /// 是否在学期内
+    /// </summary>
+    /// <returns></returns>
     bool IsInSchool();
+    
+    /// <summary>
+    /// 是否小于结束时间
+    /// </summary>
+    /// <param name="time"></param>
+    /// <returns></returns>
     bool IsLessThanEnd(int time);
 }
 
