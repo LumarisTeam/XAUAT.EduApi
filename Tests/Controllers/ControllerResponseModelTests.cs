@@ -9,6 +9,7 @@ using Moq;
 using Newtonsoft.Json.Linq;
 using XAUAT.EduApi.Controllers;
 using XAUAT.EduApi.Configuration;
+using XAUAT.EduApi.Controllers.Old;
 using XAUAT.EduApi.Exceptions;
 using XAUAT.EduApi.Extensions;
 using XAUAT.EduApi.Interfaces;

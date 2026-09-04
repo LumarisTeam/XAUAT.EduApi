@@ -3,6 +3,7 @@ using EduApi.Data.Models;
 using Microsoft.Extensions.Options;
 using XAUAT.EduApi.Configuration;
 using XAUAT.EduApi.Controllers;
+using XAUAT.EduApi.Controllers.Old;
 
 namespace XAUAT.EduApi.Services;
 

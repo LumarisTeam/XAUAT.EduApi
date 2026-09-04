@@ -4,7 +4,7 @@ using XAUAT.EduApi.Exceptions;
 using XAUAT.EduApi.Localization;
 using XAUAT.EduApi.Services;
 
-namespace XAUAT.EduApi.Controllers;
+namespace XAUAT.EduApi.Controllers.Old;
 
 /// <summary>
 /// 支付控制器

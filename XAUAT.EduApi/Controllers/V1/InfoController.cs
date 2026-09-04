@@ -2,6 +2,7 @@ using EduApi.Data.Models;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Mvc;
 using Newtonsoft.Json;
+using XAUAT.EduApi.Controllers.Old;
 using XAUAT.EduApi.Filters;
 using XAUAT.EduApi.Extensions;
 using XAUAT.EduApi.Localization;

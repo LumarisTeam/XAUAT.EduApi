@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using XAUAT.EduApi.Localization;
 using XAUAT.EduApi.Services;
 
-namespace XAUAT.EduApi.Controllers;
+namespace XAUAT.EduApi.Controllers.Old;
 
 /// <summary>
 /// 校车时刻表控制器

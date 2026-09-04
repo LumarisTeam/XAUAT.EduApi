@@ -50,6 +50,7 @@ cp .env.example .env
 | ELECTRICITY_SUBSCRIPTION_SCAN_INTERVAL_MINUTES | 电费订阅扫描间隔（分钟） | `15` |
 | SMTP_HOST | SMTP 服务器地址 | `smtp.qq.com` |
 | TEST_ACCOUNT_ENABLED | 是否启用测试账号 | `false` |
+| LOG_VIEW_TOKEN | 日志接口访问令牌（设置后启用鉴权） | `change-me` |
 
 ## 部署方式
 
@@ -70,6 +71,10 @@ dotnet run --project XAUAT.EduApi
 ## API 接口文档
 
 项目集成了 Scalar API 文档，启动后可通过 `/scalar/v1` 路径访问详细的接口文档。
+
+### 日志查询
+
+`GET /Logs?page=1&pageSize=50` 返回日志文件及当前运行日志，按时间倒序分页。可通过 `level`（最低级别）和 `search`（关键词）筛选。服务启动时会读取 `logs/log-*.txt`，运行期间继续写入按天轮转的日志文件，并保留最近 2000 条内存记录；配置 `LOG_VIEW_TOKEN` 后，请使用 `X-Log-Token` 请求头或 Bearer Token 访问。
 
 ## MCP 集成
 

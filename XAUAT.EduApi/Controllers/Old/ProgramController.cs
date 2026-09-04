@@ -1,11 +1,11 @@
-using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using XAUAT.EduApi.Extensions;
 using XAUAT.EduApi.Filters;
 using XAUAT.EduApi.Localization;
 using XAUAT.EduApi.Services;
 
-namespace XAUAT.EduApi.Controllers;
+namespace XAUAT.EduApi.Controllers.Old;
 
 /// <summary>
 /// 培养方案控制器

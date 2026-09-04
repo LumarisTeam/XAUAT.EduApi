@@ -4,7 +4,7 @@ using XAUAT.EduApi.Exceptions;
 using XAUAT.EduApi.Interfaces;
 using XAUAT.EduApi.Localization;
 
-namespace XAUAT.EduApi.Controllers;
+namespace XAUAT.EduApi.Controllers.Old;
 
 /// <summary>
 /// 登录控制器

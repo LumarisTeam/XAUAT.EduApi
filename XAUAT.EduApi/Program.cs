@@ -3,6 +3,7 @@ using EduApi.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Serilog;
+using XAUAT.EduApi.Logging;
 using XAUAT.EduApi.Caching;
 using XAUAT.EduApi.Extensions;
 using XAUAT.EduApi.OpenApi;
@@ -11,28 +12,27 @@ LoadDotEnvIfPresent();
 
 // 先创建builder对象
 var builder = WebApplication.CreateBuilder(args);
+var logStore = new InMemoryLogStore();
+builder.Services.AddSingleton<ILogStore>(logStore);
 
-if (builder.Environment.IsDevelopment())
-{
-    builder.Logging.AddConsole();
-}
-else
-{
-    // 统一日志配置，适用于所有环境
-    var logger = new LoggerConfiguration()
-        .MinimumLevel.Information()
-        .Enrich.FromLogContext()
-        .WriteTo.Console(
-            outputTemplate: "{Timestamp:HH:mm:ss} [{Level:u3}] {Message:lj} {Properties:j}{NewLine}{Exception}")
-        .CreateLogger();
+// 统一日志配置，并保留最近日志供 /Logs 分页查询。
+var serilogLogger = new LoggerConfiguration()
+    .MinimumLevel.Information()
+    .Enrich.FromLogContext()
+    .WriteTo.Console(
+        outputTemplate: "{Timestamp:HH:mm:ss} [{Level:u3}] {Message:lj} {Properties:j}{NewLine}{Exception}")
+    .WriteTo.File(
+        Environment.GetEnvironmentVariable("SERILOG_FILE_PATH") ?? "logs/log-.txt",
+        rollingInterval: RollingInterval.Day,
+        retainedFileCountLimit: 31,
+        outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} {Level:u3}] {Message:lj} {Properties:j}{NewLine}{Exception}")
+    .WriteTo.Sink(new InMemoryLogSink(logStore))
+    .CreateLogger();
 
-    builder.Logging
-        .ClearProviders()
-        .AddConsole()
-        .AddDebug()
-        .SetMinimumLevel(LogLevel.Information)
-        .AddSerilog(logger);
-}
+builder.Logging
+    .ClearProviders()
+    .SetMinimumLevel(LogLevel.Information)
+    .AddSerilog(serilogLogger);
 
 // 基础服务配置
 builder.Services.AddControllers();
