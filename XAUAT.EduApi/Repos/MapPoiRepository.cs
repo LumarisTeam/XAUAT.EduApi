@@ -94,17 +94,55 @@ public class MapPoiRepository(IDbContextFactory<EduContext> contextFactory) : IM
             .ConfigureAwait(false);
     }
 
-    public async Task AddAsync(MapPoiModel poi)
+    public async Task UpsertAsync(MapPoiModel poi)
     {
         await using var context = await contextFactory.CreateDbContextAsync().ConfigureAwait(false);
-        await context.MapPois.AddAsync(poi).ConfigureAwait(false);
+        var existing = await context.MapPois
+            .OrderBy(p => p.Id)
+            .FirstOrDefaultAsync(p => p.Name == poi.Name)
+            .ConfigureAwait(false);
+
+        if (existing is null)
+        {
+            await context.MapPois.AddAsync(poi).ConfigureAwait(false);
+        }
+        else
+        {
+            ApplyImport(existing, poi);
+        }
+
         await context.SaveChangesAsync().ConfigureAwait(false);
     }
 
-    public async Task AddRangeAsync(IEnumerable<MapPoiModel> pois)
+    public async Task UpsertRangeAsync(IEnumerable<MapPoiModel> pois)
     {
         await using var context = await contextFactory.CreateDbContextAsync().ConfigureAwait(false);
-        await context.MapPois.AddRangeAsync(pois).ConfigureAwait(false);
+        var distinctPois = pois
+            .GroupBy(p => p.Name, StringComparer.Ordinal)
+            .Select(group => group.Last())
+            .ToList();
+
+        var names = distinctPois.Select(p => p.Name).ToList();
+        var existingByName = (await context.MapPois
+                .Where(p => names.Contains(p.Name))
+                .OrderBy(p => p.Id)
+                .ToListAsync()
+                .ConfigureAwait(false))
+            .GroupBy(p => p.Name, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+
+        foreach (var poi in distinctPois)
+        {
+            if (existingByName.TryGetValue(poi.Name, out var existing))
+            {
+                ApplyImport(existing, poi);
+            }
+            else
+            {
+                await context.MapPois.AddAsync(poi).ConfigureAwait(false);
+            }
+        }
+
         await context.SaveChangesAsync().ConfigureAwait(false);
     }
 
@@ -122,5 +160,22 @@ public class MapPoiRepository(IDbContextFactory<EduContext> contextFactory) : IM
         context.MapPois.RemoveRange(all);
         await context.SaveChangesAsync().ConfigureAwait(false);
         return all.Count;
+    }
+
+    private static void ApplyImport(MapPoiModel target, MapPoiModel source)
+    {
+        source.Id = target.Id;
+        source.CreatedAt = target.CreatedAt;
+
+        target.Category = source.Category;
+        target.Latitude = source.Latitude;
+        target.Longitude = source.Longitude;
+        target.Description = source.Description;
+        target.Address = source.Address;
+        target.Campus = source.Campus;
+        target.Icon = source.Icon;
+        target.IsActive = source.IsActive;
+        target.SortOrder = source.SortOrder;
+        target.UpdatedAt = source.UpdatedAt;
     }
 }

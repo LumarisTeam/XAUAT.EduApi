@@ -82,13 +82,20 @@ public class MapService(IMapPoiRepository repository, ICacheService cacheService
         poi.CreatedAt = DateTime.UtcNow;
         poi.UpdatedAt = DateTime.UtcNow;
 
-        await repository.AddAsync(poi);
+        await repository.UpsertAsync(poi);
         await InvalidateCacheAsync();
     }
 
     public async Task AddPoisBatchAsync(IEnumerable<MapPoiModel> pois)
     {
-        await repository.AddRangeAsync(pois);
+        var poiList = pois.ToList();
+        foreach (var poi in poiList)
+        {
+            poi.IsActive = true;
+            poi.UpdatedAt = DateTime.UtcNow;
+        }
+
+        await repository.UpsertRangeAsync(poiList);
         await InvalidateCacheAsync();
     }
 

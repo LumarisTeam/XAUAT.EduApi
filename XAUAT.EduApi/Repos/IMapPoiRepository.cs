@@ -11,8 +11,8 @@ public interface IMapPoiRepository
     Task<List<MapPoiModel>> SearchAsync(string keyword);
     Task<List<string>> GetCategoriesAsync();
     Task<List<string>> GetCampusesAsync();
-    Task AddAsync(MapPoiModel poi);
-    Task AddRangeAsync(IEnumerable<MapPoiModel> pois);
+    Task UpsertAsync(MapPoiModel poi);
+    Task UpsertRangeAsync(IEnumerable<MapPoiModel> pois);
     Task UpdateAsync(MapPoiModel poi);
     Task<int> RemoveAllAsync();
 }
