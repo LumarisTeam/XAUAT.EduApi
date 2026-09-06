@@ -69,11 +69,6 @@ var serviceConfig = ServiceConfiguration.FromEnvironment();
 // 模块化服务注册
 builder.Services.AddAllServices(serviceConfig);
 
-// MCP 服务注册（HTTP transport，支持本地和网络访问）
-builder.Services.AddMcpServer()
-    .WithHttpTransport()
-    .WithToolsFromAssembly();
-
 var app = builder.Build();
 
 // 配置中间件管道

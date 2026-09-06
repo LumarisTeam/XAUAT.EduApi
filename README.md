@@ -104,55 +104,6 @@ dotnet run --project XAUAT.EduApi
 
 `GET /Logs?page=1&pageSize=50` 返回日志文件及当前运行日志，按时间倒序分页。可通过 `level`（最低级别）和 `search`（关键词）筛选。服务启动时会读取 `logs/log-*.txt`，运行期间继续写入按天轮转的日志文件，并保留最近 2000 条内存记录；配置 `LOG_VIEW_TOKEN` 后，请使用 `X-Log-Token` 请求头或 Bearer Token 访问。
 
-## MCP 集成
-
-本项目内置 [Model Context Protocol (MCP)](https://modelcontextprotocol.io) 支持，允许 AI 客户端（如 Claude Desktop、Cursor）直接调用教务数据接口。
-
-### 可用 Tools
-
-| Tool | 说明 |
-|------|------|
-| `GetCourse` | 获取学生课程表，需提供学号和 Cookie |
-| `GetScores` | 获取指定学期成绩，需提供学号、学期和 Cookie |
-| `GetCurrentSemester` | 获取当前学期信息 |
-| `GetExamArrangements` | 获取考试安排，需提供 Cookie |
-| `GetBus` | 查询校车时刻表，无需认证 |
-| `GetElectricityBalance` | 查询电费余额和本周用电量 |
-
-> 需要认证的接口需传入教务系统 Cookie（登录后从 `/Login` 接口获取，值为 `__pstsid__=...` 格式，或通过 `xauat` 请求头传入）。
-
-### 网络访问（HTTP Transport）
-
-服务启动后 MCP endpoint 位于 `/mcp`，在客户端配置文件中添加：
-
-```json
-{
-  "mcpServers": {
-    "xauat-edu": {
-      "url": "http://localhost:5000/mcp"
-    }
-  }
-}
-```
-
-**Claude Desktop** 配置文件路径：
-- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
-
-### 本地访问（Stdio Transport）
-
-如需通过 stdio 模式在本地使用（适合 Claude Code CLI 等工具），可使用 `curl` 或直接指向本地地址：
-
-```json
-{
-  "mcpServers": {
-    "xauat-edu": {
-      "url": "http://127.0.0.1:5000/mcp"
-    }
-  }
-}
-```
-
 ## 主要依赖
 
 - ASP.NET Core 9.0
