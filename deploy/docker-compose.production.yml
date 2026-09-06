@@ -1,0 +1,13 @@
+services:
+  app:
+    image: ${IMAGE:?IMAGE must be set to an immutable image tag}
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    volumes:
+      - app-logs:/app/logs
+
+volumes:
+  app-logs:

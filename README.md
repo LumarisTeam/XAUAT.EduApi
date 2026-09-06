@@ -61,6 +61,34 @@ docker build -t xauat-edu-api .
 docker run -d -p 8080:8080 xauat-edu-api
 ```
 
+### GitHub Actions 自动部署
+
+仓库包含生产工作流 `.github/workflows/deploy-production.yml`：提交到 `master` 后会先执行测试，再构建并推送 GHCR 镜像，最后通过 SSH 让服务器拉取该次提交对应的镜像并重启容器。
+
+首次部署前，在服务器创建部署目录及仅供服务器使用的环境文件：
+
+```bash
+sudo mkdir -p /opt/xauat-eduapi
+sudo chown "$USER" /opt/xauat-eduapi
+cp .env.example /opt/xauat-eduapi/.env
+sed -i 's/^ASPNETCORE_ENVIRONMENT=.*/ASPNETCORE_ENVIRONMENT=Production/' /opt/xauat-eduapi/.env
+chmod 600 /opt/xauat-eduapi/.env
+```
+
+在 GitHub 仓库的 `Settings -> Environments -> production` 中配置以下 Secrets：
+
+| Secret | 用途 |
+|-------|------|
+| `DEPLOY_HOST` | 服务器地址 |
+| `DEPLOY_PORT` | SSH 端口，例如 `22` |
+| `DEPLOY_USER` | 可运行 Docker 的 SSH 用户 |
+| `DEPLOY_PATH` | 部署目录，例如 `/opt/xauat-eduapi` |
+| `DEPLOY_SSH_PRIVATE_KEY` | 对应部署用户的 Ed25519 私钥 |
+| `DEPLOY_KNOWN_HOSTS` | `ssh-keyscan -H <服务器地址>` 的输出 |
+| `GHCR_PULL_TOKEN` | 仅具 `read:packages` 权限、可拉取该镜像的 GitHub token |
+
+服务器应已安装 Docker Engine 和 Docker Compose 插件，且部署用户有运行 Docker 的权限。将首次生成的 GHCR 包设置为允许该仓库访问；若镜像设为公开，`GHCR_PULL_TOKEN` 仍可保留为最小权限 token。生产配置写在服务器 `/opt/xauat-eduapi/.env`，不要提交到仓库。可选的 `APP_PORT` 用于调整宿主机暴露端口，默认为 `8080`。
+
 ### 本地运行
 
 ```bash
