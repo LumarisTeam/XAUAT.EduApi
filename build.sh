@@ -14,4 +14,13 @@ if [ ! -f ./prod.env ]; then
   echo "错误：未找到 ./prod.env，请先创建该文件再运行。"
   exit 1
 fi
-sudo docker run -d   --name xauat-eduapi   -p "${PART}:8080"   --env-file ./prod.env   xauat-eduapi:latest
+# 支付已拆到 XAUAT.PaymentAPI，EduApi 必须能通过共享网络访问到它，
+# 且 prod.env 里要有 PAYMENT_API_BASE_URL（缺失时 EduApi 启动即失败）。
+NETWORK_NAME="${NETWORK_NAME:-xauat-net}"
+sudo docker network inspect "$NETWORK_NAME" >/dev/null 2>&1 || sudo docker network create "$NETWORK_NAME"
+sudo docker run -d \
+  --name xauat-eduapi \
+  --network "$NETWORK_NAME" \
+  -p "${PART}:8080" \
+  --env-file ./prod.env \
+  xauat-eduapi:latest

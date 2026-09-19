@@ -81,6 +81,8 @@ jobs:
       DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
       DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
       GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+      # 与 XAUAT.PaymentAPI 共用的 docker 网络，让 PAYMENT_API_BASE_URL 里的服务名可解析
+      NETWORK_NAME: xauat-net
     steps:
       - uses: actions/checkout@v4
       - name: Configure SSH
@@ -105,13 +107,17 @@ jobs:
           GHCR_USERNAME: ${{ github.actor }}
         run: |
           ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
-            "DEPLOY_PATH='$DEPLOY_PATH' IMAGE='$IMAGE' GHCR_USERNAME='$GHCR_USERNAME' GHCR_PULL_TOKEN='$GHCR_PULL_TOKEN' bash -se" <<'REMOTE_SCRIPT'
+            "DEPLOY_PATH='$DEPLOY_PATH' IMAGE='$IMAGE' GHCR_USERNAME='$GHCR_USERNAME' NETWORK_NAME='$NETWORK_NAME' GHCR_PULL_TOKEN='$GHCR_PULL_TOKEN' bash -se" <<'REMOTE_SCRIPT'
           set -o pipefail
           cd "$DEPLOY_PATH"
           test -f .env || { echo "Missing $DEPLOY_PATH/.env" >&2; exit 1; }
+
+          # 共享网络由 EduApi / PaymentAPI 两个栈共用，幂等创建
+          docker network inspect "$NETWORK_NAME" >/dev/null 2>&1 || docker network create "$NETWORK_NAME"
+
           printf '%s' "$GHCR_PULL_TOKEN" | docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin
-          IMAGE="$IMAGE" docker compose pull app
-          IMAGE="$IMAGE" docker compose up -d --no-build --remove-orphans app
+          IMAGE="$IMAGE" NETWORK_NAME="$NETWORK_NAME" docker compose pull app
+          IMAGE="$IMAGE" NETWORK_NAME="$NETWORK_NAME" docker compose up -d --no-build --remove-orphans app
           docker image prune --force
           docker logout ghcr.io
           REMOTE_SCRIPT

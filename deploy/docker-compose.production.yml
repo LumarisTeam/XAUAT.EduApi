@@ -1,6 +1,7 @@
 services:
   app:
     image: ${IMAGE:?IMAGE must be set to an immutable image tag}
+    container_name: xauat-eduapi
     restart: unless-stopped
     env_file:
       - .env
@@ -8,6 +9,19 @@ services:
       - "${APP_PORT:-8080}:8080"
     volumes:
       - app-logs:/app/logs
+    networks:
+      xauat-net:
+        aliases:
+          - xauat-eduapi
 
 volumes:
   app-logs:
+
+networks:
+  # 与 XAUAT.PaymentAPI 共用，让 .env 里的 PAYMENT_API_BASE_URL
+  # （http://xauat-paymentapi:8080）能解析到对方容器。
+  # 首次部署前需在宿主机上创建一次：docker network create xauat-net
+  # CI 的部署脚本会幂等地创建它。
+  xauat-net:
+    external: true
+    name: ${NETWORK_NAME:-xauat-net}
