@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using Moq;
 using StackExchange.Redis;
 using XAUAT.EduApi.Caching;
+using XAUAT.EduApi.Interfaces;
 using XAUAT.EduApi.Services;
 
 namespace XAUAT.EduApi.Tests.Services;

@@ -8,6 +8,7 @@ using Polly;
 using XAUAT.EduApi.Caching;
 using XAUAT.EduApi.Exceptions;
 using XAUAT.EduApi.Extensions;
+using XAUAT.EduApi.Interfaces;
 using XAUAT.EduApi.Repos;
 
 namespace XAUAT.EduApi.Services;

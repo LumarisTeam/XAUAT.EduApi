@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using XAUAT.EduApi.Interfaces;
 using XAUAT.EduApi.Services;
 
 namespace XAUAT.EduApi.Extensions;

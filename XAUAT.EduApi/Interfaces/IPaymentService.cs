@@ -1,6 +1,7 @@
 using EduApi.Data.Models;
+using XAUAT.EduApi.Services;
 
-namespace XAUAT.EduApi.Services;
+namespace XAUAT.EduApi.Interfaces;
 
 /// <summary>
 /// 校园卡支付数据访问。

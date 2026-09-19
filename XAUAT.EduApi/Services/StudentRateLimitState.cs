@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
 using StackExchange.Redis;
+using XAUAT.EduApi.Interfaces;
 
 namespace XAUAT.EduApi.Services;
 

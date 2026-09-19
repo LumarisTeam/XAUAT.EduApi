@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using EduApi.Data.Models;
 using XAUAT.EduApi.Extensions;
+using XAUAT.EduApi.Interfaces;
 using XAUAT.EduApi.Services;
 
 namespace XAUAT.EduApi.Localization;

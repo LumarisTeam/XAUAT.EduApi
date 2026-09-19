@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.Json;
 using EduApi.Data.Models;
 using XAUAT.EduApi.Exceptions;
+using XAUAT.EduApi.Interfaces;
 
 namespace XAUAT.EduApi.Services;
 

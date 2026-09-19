@@ -5,6 +5,7 @@ using Newtonsoft.Json;
 using XAUAT.EduApi.Controllers.Old;
 using XAUAT.EduApi.Filters;
 using XAUAT.EduApi.Extensions;
+using XAUAT.EduApi.Interfaces;
 using XAUAT.EduApi.Localization;
 using XAUAT.EduApi.Services;
 

@@ -1,4 +1,4 @@
-namespace XAUAT.EduApi.Services;
+namespace XAUAT.EduApi.Interfaces;
 
 public interface IStudentRateLimitExecutor
 {

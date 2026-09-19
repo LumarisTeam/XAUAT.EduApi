@@ -4,6 +4,7 @@ using EduApi.Data.Models;
 using XAUAT.EduApi.Controllers.V1;
 using XAUAT.EduApi.Exceptions;
 using XAUAT.EduApi.Extensions;
+using XAUAT.EduApi.Interfaces;
 using XAUAT.EduApi.Localization;
 using XAUAT.EduApi.Services;
 

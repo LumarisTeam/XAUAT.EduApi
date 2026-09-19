@@ -1,4 +1,4 @@
-namespace XAUAT.EduApi.Services;
+namespace XAUAT.EduApi.Interfaces;
 
 /// <summary>
 /// 监控服务接口

@@ -1,5 +1,6 @@
 using XAUAT.EduApi.Exceptions;
 using XAUAT.EduApi.Extensions;
+using XAUAT.EduApi.Interfaces;
 
 namespace XAUAT.EduApi.Services;
 

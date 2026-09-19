@@ -1,3 +1,5 @@
+using XAUAT.EduApi.Interfaces;
+
 namespace XAUAT.EduApi.Services;
 
 public sealed class NoOpStudentRateLimitExecutor : IStudentRateLimitExecutor

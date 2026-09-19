@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using XAUAT.EduApi.Interfaces;
 using XAUAT.EduApi.Services;
 
 namespace XAUAT.EduApi.Middlewares;

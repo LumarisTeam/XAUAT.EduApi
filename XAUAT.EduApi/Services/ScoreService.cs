@@ -5,6 +5,7 @@ using Newtonsoft.Json.Linq;
 using Polly;
 using XAUAT.EduApi.Caching;
 using XAUAT.EduApi.Extensions;
+using XAUAT.EduApi.Interfaces;
 using XAUAT.EduApi.Queues;
 using XAUAT.EduApi.Repos;
 
