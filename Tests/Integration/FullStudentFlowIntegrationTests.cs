@@ -19,7 +19,7 @@ public class FullStudentFlowIntegrationTests : IDisposable
     private readonly EduContext _dbContext;
     private readonly ScoreService _scoreService;
     private readonly CourseService _courseService;
-    private readonly PaymentService _paymentService;
+    private readonly Mock<IPaymentService> _paymentService;
     private readonly InfoService _infoService;
     private readonly ScoreRepository _scoreRepository;
     private readonly Mock<IExamService> _examServiceMock;
@@ -73,7 +73,6 @@ public class FullStudentFlowIntegrationTests : IDisposable
         // 创建日志模拟
         var courseLogger = new Mock<ILogger<CourseService>>().Object;
         var scoreLogger = new Mock<ILogger<ScoreService>>().Object;
-        var paymentLogger = new Mock<ILogger<PaymentService>>().Object;
 
         // 创建成绩仓库和服务
         _scoreRepository = new ScoreRepository(new TestDbContextFactory(_dbContextOptions));
@@ -95,11 +94,12 @@ public class FullStudentFlowIntegrationTests : IDisposable
             _cacheServiceMock.Object, 
             _infoService);
 
-        // 创建支付服务
-        _paymentService = new PaymentService(
-            _cacheServiceMock.Object,
-            _httpClientFactoryMock.Object,
-            paymentLogger);
+        // 支付逻辑已迁至 XAUAT.PaymentAPI，EduApi 内只剩 IPaymentService 这一个抽象，
+        // 因此这里直接 mock 接口，不再构造具体实现。
+        _paymentService = new Mock<IPaymentService>();
+        _paymentService
+            .Setup(m => m.Login(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .ReturnsAsync("test-payment-token");
     }
 
     [Fact]
@@ -154,22 +154,11 @@ public class FullStudentFlowIntegrationTests : IDisposable
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(testScores);
 
-        // 设置缓存返回支付token
-        _cacheServiceMock
-            .Setup(m => m.GetOrCreateAsync(
-                It.IsAny<string>(),
-                It.IsAny<Func<Task<string>>>(),
-                It.IsAny<TimeSpan?>(),
-                It.IsAny<CacheLevel>(),
-                It.IsAny<int>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync("test-payment-token");
-
         // Act
         var timeInfo = _infoService.GetTime();
         var isInSchool = _infoService.IsGreatThanStart();
         var scoresResult = await _scoreService.GetScoresAsync(studentId, semester, cookie);
-        var paymentToken = await _paymentService.Login(cardNum);
+        var paymentToken = await _paymentService.Object.Login(cardNum);
 
         // Assert
         Assert.NotNull(timeInfo);
@@ -195,6 +184,12 @@ public class FullStudentFlowIntegrationTests : IDisposable
         var cardNum = "123456";
         var cookie = "test-cookie";
         var semester = "2025-2026-1";
+
+        // 让支付服务抛错——真实场景下由 HttpPaymentService 在代理失败时抛出
+        _paymentService.Reset();
+        _paymentService
+            .Setup(m => m.Login(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .ThrowsAsync(new PaymentServiceException("支付服务不可用"));
 
         // 设置缓存操作失败 - 清除之前的设置
         _cacheServiceMock.Reset();
@@ -234,9 +229,9 @@ public class FullStudentFlowIntegrationTests : IDisposable
         var scoresResult = await _scoreService.GetScoresAsync(studentId, semester, cookie);
         Assert.NotNull(scoresResult);
 
-        // 验证支付服务在缓存失败时能正确处理异常
+        // 验证支付服务不可用时异常能正确向上传播
         await Assert.ThrowsAsync<PaymentServiceException>(() =>
-            _paymentService.Login(cardNum));
+            _paymentService.Object.Login(cardNum));
 
         // 验证课程服务在缓存失败时能降级处理（返回空列表而不抛出异常）
         var coursesResult = await _courseService.GetCoursesAsync(studentId, cookie);

@@ -543,7 +543,7 @@ public class ExamServiceTests
     public async Task GetThisSemester_ShouldReturnTestFixtureData_WhenTestAccountMatched()
     {
         var resolver = new Mock<ITestAccountResolver>();
-        resolver.Setup(x => x.IsTestAccount("test-cookie", null, null)).Returns(true);
+        resolver.Setup(x => x.IsTestAccount("test-cookie", null)).Returns(true);
 
         var provider = new Mock<ITestDataProvider>();
         provider.Setup(x => x.GetCurrentSemesterAsync(It.IsAny<CancellationToken>()))

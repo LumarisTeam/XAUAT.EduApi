@@ -106,7 +106,7 @@ public static class ServiceCollectionExtensions
         /// 注册业务服务
         /// </summary>
         /// <returns>服务集合</returns>
-        public IServiceCollection AddBusinessServices()
+        public IServiceCollection AddBusinessServices(ServiceConfiguration configuration)
         {
             services.AddSingleton<ILanguageResolver, HeaderLanguageResolver>();
             services.AddSingleton<IApiMessageLocalizer, ApiMessageLocalizer>();
@@ -115,7 +115,21 @@ public static class ServiceCollectionExtensions
             services.AddScoped<IExamService, ExamService>();
             services.AddScoped<IProgramService, ProgramService>();
             services.AddScoped<IInfoService, InfoService>();
-            services.AddScoped<IPaymentService, PaymentService>();
+            // 支付：EduApi 不再内置实现，一律转发到 XAUAT.PaymentAPI
+            var paymentApiBaseUrl = configuration.PaymentApiBaseUrl;
+            if (string.IsNullOrEmpty(paymentApiBaseUrl))
+            {
+                throw new InvalidOperationException(
+                    "缺少 PAYMENT_API_BASE_URL：EduApi 已不再内置支付实现，必须配置 XAUAT.PaymentAPI 的地址。");
+            }
+
+            // 刻意不挂 Polly 重试策略：PaymentAPI 的 503 承载"校园卡上游失败"的业务语义，
+            // 重试它会让校园卡系统承受 4 倍压力（每次重试都会再打一次上游）。
+            services.AddHttpClient<IPaymentService, HttpPaymentService>(client =>
+            {
+                client.BaseAddress = new Uri(paymentApiBaseUrl);
+                client.Timeout = HttpTimeouts.EduSystem;
+            });
             services.AddSingleton<IClassTimeService, ClassTimeService>();
             services.AddScoped<ICourseService, CourseService>();
             services.AddScoped<IScoreService, ScoreService>();
@@ -247,7 +261,7 @@ public static class ServiceCollectionExtensions
                 .AddTestAccountServices(configuration.TestAccount)
                 .AddCacheServices() // 添加缓存服务
                 .AddRepositoryServices()
-                .AddBusinessServices()
+                .AddBusinessServices(configuration)
                 .AddHttpClientServices()
                 .AddRateLimiterServices();
 

@@ -16,9 +16,6 @@ public interface ITestDataProvider
     Task<ExamResponse> GetExamResponseAsync(CancellationToken cancellationToken = default);
     Task<List<PlanCourse>> GetProgramAsync(CancellationToken cancellationToken = default);
     Task<List<StudyModule>> GetCompletionAsync(CancellationToken cancellationToken = default);
-    Task<string> GetPaymentTokenAsync(CancellationToken cancellationToken = default);
-    Task<List<PaymentModel>> GetPaymentTurnoverAsync(CancellationToken cancellationToken = default);
-    Task<double> GetPaymentBalanceAsync(CancellationToken cancellationToken = default);
 }
 
 public class TestDataProvider(
@@ -88,26 +85,6 @@ public class TestDataProvider(
     public Task<List<StudyModule>> GetCompletionAsync(CancellationToken cancellationToken = default)
         => ReadFixtureAsync<List<StudyModule>>("completion.json", cancellationToken);
 
-    public Task<string> GetPaymentTokenAsync(CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult($"test-token-{_options.StudentId}");
-    }
-
-    public async Task<List<PaymentModel>> GetPaymentTurnoverAsync(CancellationToken cancellationToken = default)
-    {
-        var records = await ReadFixtureAsync<List<PaymentTurnoverFixtureItem>>("payment-turnover.json", cancellationToken);
-        return records
-            .Select(item => new PaymentModel(item.TurnoverType, item.DatetimeStr, item.Resume, item.Tranamt))
-            .ToList();
-    }
-
-    public async Task<double> GetPaymentBalanceAsync(CancellationToken cancellationToken = default)
-    {
-        var fixture = await ReadFixtureAsync<PaymentBalanceFixture>("payment-balance.json", cancellationToken);
-        return fixture.Total;
-    }
-
     private async Task<T> ReadFixtureAsync<T>(string fileName, CancellationToken cancellationToken)
     {
         var filePath = GetFixturePath(fileName);
@@ -157,16 +134,4 @@ public class TestDataProvider(
         public bool IsMinor { get; set; }
     }
 
-    private sealed class PaymentTurnoverFixtureItem
-    {
-        public string TurnoverType { get; set; } = "";
-        public string DatetimeStr { get; set; } = "";
-        public string Resume { get; set; } = "";
-        public double Tranamt { get; set; }
-    }
-
-    private sealed class PaymentBalanceFixture
-    {
-        public double Total { get; set; }
-    }
 }

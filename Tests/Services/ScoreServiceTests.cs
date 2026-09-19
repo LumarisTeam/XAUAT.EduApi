@@ -270,7 +270,7 @@ public class ScoreServiceTests
     public async Task GetScoresAsync_ShouldReturnTestFixtureData_WhenTestAccountMatched()
     {
         var resolver = new Mock<ITestAccountResolver>();
-        resolver.Setup(x => x.IsTestAccount("test-cookie", "20239999", null)).Returns(true);
+        resolver.Setup(x => x.IsTestAccount("test-cookie", "20239999")).Returns(true);
 
         var provider = new Mock<ITestDataProvider>();
         provider.Setup(x => x.GetScoresAsync("301", It.IsAny<CancellationToken>()))

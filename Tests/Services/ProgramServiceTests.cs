@@ -153,7 +153,7 @@ public class ProgramServiceTests
     public async Task GetAllTrainProgram_ShouldReturnTestFixtureData_WhenTestAccountMatched()
     {
         var resolver = new Mock<ITestAccountResolver>();
-        resolver.Setup(x => x.IsTestAccount("cookie", "20239999", null)).Returns(true);
+        resolver.Setup(x => x.IsTestAccount("cookie", "20239999")).Returns(true);
 
         var provider = new Mock<ITestDataProvider>();
         provider.Setup(x => x.GetProgramAsync(It.IsAny<CancellationToken>()))

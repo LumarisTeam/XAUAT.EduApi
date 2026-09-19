@@ -7,7 +7,7 @@ namespace XAUAT.EduApi.Services;
 public interface ITestAccountResolver
 {
     bool IsTestLogin(string username, string password);
-    bool IsTestAccount(string? cookie = null, string? studentId = null, string? cardNum = null);
+    bool IsTestAccount(string? cookie = null, string? studentId = null);
     LoginResponse CreateLoginResponse();
 }
 
@@ -24,7 +24,7 @@ public class TestAccountResolver(IOptions<TestAccountOptions> options) : ITestAc
                string.Equals(password, _options.Password, StringComparison.Ordinal);
     }
 
-    public bool IsTestAccount(string? cookie = null, string? studentId = null, string? cardNum = null)
+    public bool IsTestAccount(string? cookie = null, string? studentId = null)
     {
         if (!_options.Enabled)
         {
@@ -38,7 +38,7 @@ public class TestAccountResolver(IOptions<TestAccountOptions> options) : ITestAc
             return true;
         }
 
-        return MatchesStudentIdentity(studentId) || MatchesStudentIdentity(cardNum);
+        return MatchesStudentIdentity(studentId);
     }
 
     public LoginResponse CreateLoginResponse()

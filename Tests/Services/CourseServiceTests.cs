@@ -324,7 +324,7 @@ public class CourseServiceTests
     public async Task GetCoursesAsync_ShouldReturnTestFixtureData_WhenTestAccountMatched()
     {
         var resolver = new Mock<ITestAccountResolver>();
-        resolver.Setup(x => x.IsTestAccount("test-cookie", "20239999", null)).Returns(true);
+        resolver.Setup(x => x.IsTestAccount("test-cookie", "20239999")).Returns(true);
 
         var provider = new Mock<ITestDataProvider>();
         provider.Setup(x => x.GetCoursesAsync(It.IsAny<CancellationToken>()))

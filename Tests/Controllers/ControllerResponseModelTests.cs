@@ -283,7 +283,9 @@ public class ControllerResponseModelTests
     public async Task PaymentController_ShouldReturnTypedServiceUnavailableError()
     {
         var paymentService = new Mock<IPaymentService>();
-        paymentService.Setup(x => x.Login("123456", It.IsAny<string>()))
+        // 必须把 language 也写成 It.IsAny——省略可选参数会被 Moq 当作字面量 "zh" 匹配，
+        // 导致非 zh 语言的用例 setup 失配、拿到 Ok(null) 而不是 503。
+        paymentService.Setup(x => x.Login("123456", It.IsAny<string>(), It.IsAny<string>()))
             .ThrowsAsync(new PaymentServiceException("远端失败"));
 
         var controller = new PaymentController(
@@ -308,7 +310,9 @@ public class ControllerResponseModelTests
     public async Task PaymentController_ShouldReturnLocalizedServiceUnavailableError(string language, string expectedError)
     {
         var paymentService = new Mock<IPaymentService>();
-        paymentService.Setup(x => x.Login("123456", It.IsAny<string>()))
+        // 必须把 language 也写成 It.IsAny——省略可选参数会被 Moq 当作字面量 "zh" 匹配，
+        // 导致非 zh 语言的用例 setup 失配、拿到 Ok(null) 而不是 503。
+        paymentService.Setup(x => x.Login("123456", It.IsAny<string>(), It.IsAny<string>()))
             .ThrowsAsync(new PaymentServiceException("远端失败"));
 
         var controller = new PaymentController(
@@ -433,7 +437,7 @@ public class ControllerResponseModelTests
     public async Task InfoController_ShouldReturnTestCompletionData_WhenTestAccountMatched()
     {
         var resolver = new Mock<ITestAccountResolver>();
-        resolver.Setup(x => x.IsTestAccount("test-cookie", null, null)).Returns(true);
+        resolver.Setup(x => x.IsTestAccount("test-cookie", null)).Returns(true);
 
         var provider = new Mock<ITestDataProvider>();
         provider.Setup(x => x.GetCompletionAsync(It.IsAny<CancellationToken>()))
