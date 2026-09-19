@@ -6,16 +6,16 @@ using XAUAT.EduApi.Exceptions;
 namespace XAUAT.EduApi.Services;
 
 /// <summary>
-/// <see cref="IPaymentService"/> 的反向代理实现：把请求转给独立的 XAUAT.PaymentAPI。
+/// <see cref="IPaymentService"/> 的实现：把请求转给独立的 XAUAT.PaymentAPI。
 /// <para>
 /// 设计要点：外界契约由 <c>PaymentController</c>（V1 与 Old）负责，本类只需
-/// <b>忠实地抛出与直连实现相同类型的异常</b>，契约就由构造保证，而不必假设两边的 JSON 形状一致。
+/// <b>忠实地抛出与原有实现相同类型的异常</b>，契约就由构造保证。
 /// </para>
 /// <list type="bullet">
-///   <item>PaymentAPI 返回 503 —— 语义是"校园卡上游失败"，还原为 <see cref="PaymentServiceException"/>，
-///     让控制器回 503 + 原始 message。</item>
-///   <item>其他非 2xx（含 PaymentAPI 自身 500）—— 语义是"内部出错"，抛非 <see cref="PaymentServiceException"/>，
-///     让控制器走 catch-all 分支回 500 + 本地化文案。</item>
+///   <item>PaymentAPI 返回 503 —— 语义是"校园卡上游失败"，其纯文本 body 即上游原始消息，
+///     还原为 <see cref="PaymentServiceException"/>，让控制器回 503 + 该消息。</item>
+///   <item>其他非 2xx（含 PaymentAPI 自身 500）—— 语义是"内部出错"，抛非
+///     <see cref="PaymentServiceException"/>，让控制器走 catch-all 分支回 500 + 本地化文案。</item>
 ///   <item>连接失败 —— 语义是"支付功能不可用"，同样还原为 <see cref="PaymentServiceException"/>（503 而非 500）。</item>
 /// </list>
 /// </summary>
@@ -30,41 +30,44 @@ public class HttpPaymentService(HttpClient httpClient, ILogger<HttpPaymentServic
         PropertyNameCaseInsensitive = true
     };
 
+    /// <remarks>
+    /// <paramref name="language"/> 未被使用：PaymentAPI 不做本地化（上游接口不接受语言），
+    /// 面向用户的文案一律由本服务根据异常类型生成。保留该参数是为了不改动控制器签名。
+    /// </remarks>
     public async Task<string> Login(string cardNum, string password = "202411", string language = "zh")
     {
-        var body = await SendAsync(
-            $"v1/payment/{Uri.EscapeDataString(cardNum)}?password={Uri.EscapeDataString(password)}",
-            language,
-            "登录失败");
+        var body = await SendAsync(TokenPath(cardNum, password), "登录失败");
 
-        return JsonSerializer.Deserialize<ApiResponse<string>>(body, JsonOptions)?.Data ?? "";
+        return JsonSerializer.Deserialize<PaymentTokenResponse>(body, JsonOptions)?.Token ?? "";
     }
 
+    /// <inheritdoc cref="Login"/>
     public async Task<PaymentData> GetTurnoverAsync(string cardNum, string password = "202411", string language = "zh")
     {
-        var body = await SendAsync(
-            $"v1/payment/{Uri.EscapeDataString(cardNum)}/turnover?password={Uri.EscapeDataString(password)}",
-            language,
-            "获取消费记录失败");
+        var body = await SendAsync(TurnoverPath(cardNum, password), "获取消费记录失败");
 
-        var response = JsonSerializer.Deserialize<ApiResponse<PaymentTurnoverResult>>(body, JsonOptions);
+        var result = JsonSerializer.Deserialize<PaymentTurnoverResult>(body, JsonOptions);
 
         return new PaymentData
         {
-            Records = response?.Data?.Records ?? [],
+            Records = result?.Records ?? [],
             // PaymentAPI 的 Balance 对应 EduApi 对外契约里的 Total
-            Total = response?.Data?.Balance ?? 0
+            Total = result?.Balance ?? 0
         };
     }
 
-    private async Task<string> SendAsync(string path, string language, string errorPrefix)
+    private static string TokenPath(string cardNum, string password)
+        => $"payment/{Uri.EscapeDataString(cardNum)}/token?password={Uri.EscapeDataString(password)}";
+
+    private static string TurnoverPath(string cardNum, string password)
+        => $"payment/{Uri.EscapeDataString(cardNum)}/turnover?password={Uri.EscapeDataString(password)}";
+
+    private async Task<string> SendAsync(string path, string errorPrefix)
     {
         HttpResponseMessage response;
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, path);
-            request.Headers.TryAddWithoutValidation("x-language", language);
-            response = await httpClient.SendAsync(request);
+            response = await httpClient.GetAsync(path);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
@@ -77,30 +80,24 @@ public class HttpPaymentService(HttpClient httpClient, ILogger<HttpPaymentServic
 
             if (response.StatusCode == HttpStatusCode.ServiceUnavailable)
             {
-                throw new PaymentServiceException(ExtractMessage(body) ?? $"{errorPrefix}: 上游返回 503");
+                // 503 的 body 就是上游原始消息（纯文本，没有再包一层 JSON）
+                throw new PaymentServiceException(
+                    string.IsNullOrWhiteSpace(body) ? $"{errorPrefix}: 上游返回 503" : body.Trim());
             }
 
             if (!response.IsSuccessStatusCode)
             {
                 logger.LogError("PaymentAPI 返回 {StatusCode}: {Body}", (int)response.StatusCode, body);
-                throw new InvalidOperationException(
-                    ExtractMessage(body) ?? $"PaymentAPI 返回 {(int)response.StatusCode}");
+                throw new InvalidOperationException($"PaymentAPI 返回 {(int)response.StatusCode}");
             }
 
             return body;
         }
     }
-
-    private static string? ExtractMessage(string body)
-    {
-        try
-        {
-            using var document = JsonDocument.Parse(body);
-            return document.RootElement.TryGetProperty("message", out var message) ? message.GetString() : null;
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
 }
+
+/// <summary>
+/// PaymentAPI <c>/payment/{cardNum}/token</c> 的响应。
+/// 跨服务边界刻意各自持有 DTO 副本，不共享编译期模型。
+/// </summary>
+internal sealed record PaymentTokenResponse(string Token);

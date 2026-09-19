@@ -22,9 +22,9 @@ public class HttpPaymentServiceTests
     [Fact]
     public async Task Login_ShouldMapToken_FromCamelCaseResponse()
     {
-        // PaymentAPI 的内部契约是 camelCase；若代理侧没有大小写不敏感，
-        // data 会被静默反序列化成 null，所有端点都会返回空 token 且不报错。
-        var service = CreateService(HttpStatusCode.OK, """{"data":"token-123","code":0,"message":"ok"}""");
+        // PaymentAPI 的契约是 camelCase；若代理侧没有大小写不敏感，
+        // token 会被静默反序列化成 null，所有调用都返回空令牌且不报错。
+        var service = CreateService(HttpStatusCode.OK, """{"token":"token-123"}""");
 
         var token = await service.Login("20239999");
 
@@ -35,8 +35,8 @@ public class HttpPaymentServiceTests
     public async Task GetTurnover_ShouldMapBalanceToTotal()
     {
         const string body = """
-            {"data":{"records":[{"turnoverType":"消费","datetimeStr":"2026-05-01 12:30:00",
-            "resume":"测试食堂午餐","tranamt":18.5}],"balance":128.5},"code":0,"message":"ok"}
+            {"records":[{"turnoverType":"消费","datetimeStr":"2026-05-01 12:30:00",
+            "resume":"测试食堂午餐","tranamt":18.5}],"balance":128.5}
             """;
         var service = CreateService(HttpStatusCode.OK, body);
 
@@ -51,10 +51,9 @@ public class HttpPaymentServiceTests
     [Fact]
     public async Task Login_ShouldPreserveUpstreamMessage_WhenServiceUnavailable()
     {
-        // 503 承载"校园卡上游失败"的语义，必须还原成 PaymentServiceException，
-        // 让控制器的 503 分支拿到原始 message。
-        var service = CreateService(HttpStatusCode.ServiceUnavailable,
-            """{"error":"payment_upstream_failed","message":"登录失败: 上游超时"}""");
+        // 503 承载"校园卡上游失败"的语义，body 是纯文本的原始消息，
+        // 必须原样还原成 PaymentServiceException，让控制器的 503 分支拿到它。
+        var service = CreateService(HttpStatusCode.ServiceUnavailable, "登录失败: 上游超时", "text/plain");
 
         var ex = await Assert.ThrowsAsync<PaymentServiceException>(() => service.Login("20239999"));
 
@@ -62,12 +61,21 @@ public class HttpPaymentServiceTests
     }
 
     [Fact]
+    public async Task Login_ShouldFallBackToPrefix_WhenServiceUnavailableBodyIsEmpty()
+    {
+        var service = CreateService(HttpStatusCode.ServiceUnavailable, "", "text/plain");
+
+        var ex = await Assert.ThrowsAsync<PaymentServiceException>(() => service.Login("20239999"));
+
+        Assert.StartsWith("登录失败: ", ex.Message);
+    }
+
+    [Fact]
     public async Task Login_ShouldThrowNonPaymentServiceException_WhenUnexpectedStatus()
     {
         // 非 503 代表"内部出错"，必须抛非 PaymentServiceException，
         // 让控制器走 catch-all 分支回 500 + 本地化文案，而不是误报成上游失败。
-        var service = CreateService(HttpStatusCode.InternalServerError,
-            """{"error":"payment_unknown_error","message":"登录过程中发生未知错误"}""");
+        var service = CreateService(HttpStatusCode.InternalServerError, "boom");
 
         var ex = await Assert.ThrowsAnyAsync<Exception>(() => service.Login("20239999"));
 
@@ -94,46 +102,31 @@ public class HttpPaymentServiceTests
     }
 
     [Fact]
-    public async Task Login_ShouldForwardLanguageHeader()
-    {
-        string? forwarded = null;
-        var service = CreateService(HttpStatusCode.OK, """{"data":"t","code":0,"message":"ok"}""",
-            request => forwarded = request.Headers.TryGetValues("x-language", out var values)
-                ? string.Join(",", values)
-                : null);
-
-        await service.Login("20239999", "202411", "zh-Hant");
-
-        Assert.Equal("zh-Hant", forwarded);
-    }
-
-    [Fact]
-    public async Task Login_ShouldRequestCorrectPath()
+    public async Task Login_ShouldRequestTokenPath()
     {
         string? path = null;
-        var service = CreateService(HttpStatusCode.OK, """{"data":"t","code":0,"message":"ok"}""",
-            request => path = request.RequestUri?.PathAndQuery);
+        var service = CreateService(HttpStatusCode.OK, """{"token":"t"}""",
+            onRequest: request => path = request.RequestUri?.PathAndQuery);
 
         await service.Login("20239999", "202411");
 
-        Assert.Equal("/v1/payment/20239999?password=202411", path);
+        Assert.Equal("/payment/20239999/token?password=202411", path);
     }
 
     [Fact]
     public async Task GetTurnover_ShouldRequestTurnoverPath()
     {
         string? path = null;
-        var service = CreateService(HttpStatusCode.OK,
-            """{"data":{"records":[],"balance":0},"code":0,"message":"ok"}""",
-            request => path = request.RequestUri?.PathAndQuery);
+        var service = CreateService(HttpStatusCode.OK, """{"records":[],"balance":0}""",
+            onRequest: request => path = request.RequestUri?.PathAndQuery);
 
         await service.GetTurnoverAsync("20239999", "202411");
 
-        Assert.Equal("/v1/payment/20239999/turnover?password=202411", path);
+        Assert.Equal("/payment/20239999/turnover?password=202411", path);
     }
 
     private static HttpPaymentService CreateService(HttpStatusCode statusCode, string body,
-        Action<HttpRequestMessage>? onRequest = null)
+        string contentType = "application/json", Action<HttpRequestMessage>? onRequest = null)
     {
         var handler = new Mock<HttpMessageHandler>();
         handler.Protected()
@@ -144,7 +137,7 @@ public class HttpPaymentServiceTests
                 onRequest?.Invoke(request);
                 return Task.FromResult(new HttpResponseMessage(statusCode)
                 {
-                    Content = new StringContent(body, Encoding.UTF8, "application/json")
+                    Content = new StringContent(body, Encoding.UTF8, contentType)
                 });
             });
 
