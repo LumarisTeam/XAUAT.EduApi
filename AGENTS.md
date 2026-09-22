@@ -50,10 +50,13 @@ dotnet run -c Release --project Tests/XAUAT.EduApi.Tests.csproj -- --filter "*Pe
 
 ### Authentication Flow
 
-The system uses SSO with the external educational administration system:
+The system delegates the SSO handshake to a separate login service:
 1. `LoginController` receives credentials
-2. `SSOLoginService` calls external SSO endpoint at `https://schedule.xauat.site/login/{username}/{password}`
-3. `CookieCodeService` extracts student ID from returned cookies
+2. `HttpLoginService` POSTs `auth/login` to XAUAT.LoginApi when `LOGIN_API_BASE_URL`
+   is set, otherwise it falls back to the Flask at `https://schedule.xauat.site`.
+   The fallback is resolved in DI, so the service itself is unaware of the branch.
+3. `CookieCodeService` extracts student ID from returned cookies. The login service
+   deliberately does not return it (Flask never did), so this is a second upstream call.
 4. Subsequent requests pass cookies via `Cookie` or `xauat` header
 
 ### Database Configuration

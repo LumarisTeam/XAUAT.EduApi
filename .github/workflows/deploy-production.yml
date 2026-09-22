@@ -81,7 +81,8 @@ jobs:
       DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
       DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
       GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
-      # 与 XAUAT.PaymentAPI 共用的 docker 网络，让 PAYMENT_API_BASE_URL 里的服务名可解析
+      # 与 XAUAT.PaymentAPI / XAUAT.LoginApi 共用的 docker 网络，
+      # 让 PAYMENT_API_BASE_URL 与 LOGIN_API_BASE_URL 里的服务名可解析
       NETWORK_NAME: xauat-net
     steps:
       - uses: actions/checkout@v4

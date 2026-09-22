@@ -66,6 +66,12 @@ public class LoginController(
         {
             return RateLimited(ApiMessageKey.EduSystemRateLimited);
         }
+        catch (AccountBannedException ex)
+        {
+            logger.LogWarning("用户 {Username} 已被登录服务封禁，理由 {Reason}，解封时刻 {UnbanAt}",
+                request.Username, ex.Reason, ex.UnbanAt);
+            return RateLimited(ApiMessageKey.AccountBanned, ex.RetryAfterSeconds);
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "用户 {Username} 登录失败", request.Username);

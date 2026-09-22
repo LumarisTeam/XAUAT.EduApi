@@ -94,6 +94,8 @@ The project uses **DotNetEnv** to load configuration from a `.env` file at the s
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_ADDRESS` | SMTP config for email notifications |
 | `TEST_ACCOUNT_ENABLED` | Enable test account bypass (default false) |
 | `PROMETHEUS_ENABLED` | Enable Prometheus metrics (default true) |
+| `PAYMENT_API_BASE_URL` | XAUAT.PaymentAPI base URL; **required** — startup fails if missing |
+| `LOGIN_API_BASE_URL` | XAUAT.LoginApi base URL; if empty, falls back to the Flask at `schedule.xauat.site` |
 
 ### Database
 
@@ -128,9 +130,18 @@ See `CACHE_STRATEGY.md` for full details.
 ## Authentication Flow
 
 1. `LoginController` receives credentials
-2. `SSOLoginService` calls `https://schedule.xauat.site/login/{username}/{password}`
-3. `CookieCodeService` extracts student ID from returned cookies
+2. `HttpLoginService` POSTs `auth/login` to the login service — `LOGIN_API_BASE_URL`
+   (XAUAT.LoginApi) when set, otherwise it falls back to the Flask at
+   `https://schedule.xauat.site`. The fallback is resolved in DI, so the service
+   itself is unaware of the branch. Both implementations share one contract.
+3. `CookieCodeService` extracts student ID from returned cookies. The login service
+   deliberately does not return it (Flask never did), so this is a second upstream call.
 4. Subsequent requests pass cookies via `Cookie` or `xauat` header
+
+`HttpLoginService` maps upstream status to exceptions, and that mapping *is* the
+external contract: `401` / `200+success=false` → `LoginFailedException` (controller
+returns 401), `403+banned` → `AccountBannedException` (returns 429 + ban message with
+a `Retry-After` derived from `ban_until`), anything else → 500.
 
 ## New POI Data Import
 

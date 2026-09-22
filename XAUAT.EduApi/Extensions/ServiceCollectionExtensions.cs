@@ -111,10 +111,23 @@ public static class ServiceCollectionExtensions
             services.AddSingleton<ILanguageResolver, HeaderLanguageResolver>();
             services.AddSingleton<IApiMessageLocalizer, ApiMessageLocalizer>();
             services.AddScoped<ICodeService, CodeService>();
-            services.AddScoped<ILoginService, SSOLoginService>();
             services.AddScoped<IExamService, ExamService>();
             services.AddScoped<IProgramService, ProgramService>();
             services.AddScoped<IInfoService, InfoService>();
+            // 登录：转发到独立的登录服务（XAUAT.LoginApi），**留空则回落**到 Flask 的
+            // schedule.xauat.site——与支付不同，这里刻意保留回退：灰度期间改一个环境变量
+            // 就能在两个实现间来回切，回滚不需要回退镜像。
+            // 回退地址在这里解析掉，HttpLoginService 内部因此不必感知这层分支。
+            // 与支付同理，不挂 AddPolicyHandler：EduApi 的 GetRetryPolicy() 基于
+            // HandleTransientHttpError()，会把 5xx 一并重试；而登录只需要重试传输层错误，
+            // 那段策略留在 HttpLoginService 内部（见其注释）。
+            services.AddHttpClient<ILoginService, HttpLoginService>(client =>
+            {
+                client.BaseAddress = new Uri(configuration.ResolvedLoginApiBaseUrl);
+                // 20s：登录要跨 CAS → 教务两跳上游，HttpTimeouts 里 Slow 就是给登录/支付的
+                client.Timeout = HttpTimeouts.Slow;
+            });
+
             // 支付：EduApi 不再内置实现，一律转发到 XAUAT.PaymentAPI
             var paymentApiBaseUrl = configuration.PaymentApiBaseUrl;
             if (string.IsNullOrEmpty(paymentApiBaseUrl))

@@ -18,8 +18,9 @@ volumes:
   app-logs:
 
 networks:
-  # 与 XAUAT.PaymentAPI 共用，让 .env 里的 PAYMENT_API_BASE_URL
-  # （http://xauat-paymentapi:8080）能解析到对方容器。
+  # 与 XAUAT.PaymentAPI、XAUAT.LoginApi 共用，让 .env 里的 PAYMENT_API_BASE_URL
+  # （http://xauat-paymentapi:8080）与 LOGIN_API_BASE_URL
+  # （http://xauat-loginapi:8080）能解析到各自容器。
   # 首次部署前需在宿主机上创建一次：docker network create xauat-net
   # CI 的部署脚本会幂等地创建它。
   xauat-net:

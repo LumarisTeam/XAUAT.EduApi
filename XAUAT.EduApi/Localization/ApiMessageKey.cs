@@ -14,6 +14,7 @@ public static class ApiMessageKey
     public const string BusOldPlatformSuffix = nameof(BusOldPlatformSuffix);
     public const string ServiceUnavailable = nameof(ServiceUnavailable);
     public const string EduSystemRateLimited = nameof(EduSystemRateLimited);
+    public const string AccountBanned = nameof(AccountBanned);
     public const string PaymentLoginUnknownError = nameof(PaymentLoginUnknownError);
     public const string PaymentTurnoverUnknownError = nameof(PaymentTurnoverUnknownError);
 }

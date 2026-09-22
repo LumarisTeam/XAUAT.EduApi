@@ -130,7 +130,16 @@ public class ApiMessageLocalizer : IApiMessageLocalizer
                 russian: "При получении записей о расходах произошла неизвестная ошибка.",
                 french: "Une erreur inconnue s'est produite lors de la récupération des opérations.",
                 japanese: "利用明細の取得中に不明なエラーが発生しました。",
-                korean: "사용 내역을 가져오는 중 알 수 없는 오류가 발생했습니다.")
+                korean: "사용 내역을 가져오는 중 알 수 없는 오류가 발생했습니다."),
+            [ApiMessageKey.AccountBanned] = CreateLocalizedMessage(
+                simplifiedChinese: "账户已被暂时封禁，请稍后重试或联系管理员",
+                traditionalChinese: "帳戶已被暫時封禁，請稍後重試或聯絡管理員",
+                english: "This account is temporarily banned. Please try again later or contact an administrator.",
+                german: "Dieses Konto ist vorübergehend gesperrt. Bitte versuchen Sie es später erneut oder wenden Sie sich an einen Administrator.",
+                russian: "Эта учётная запись временно заблокирована. Повторите попытку позже или обратитесь к администратору.",
+                french: "Ce compte est temporairement banni. Veuillez réessayer plus tard ou contacter un administrateur.",
+                japanese: "このアカウントは一時的に利用停止されています。しばらくしてから再試行するか、管理者にお問い合わせください。",
+                korean: "이 계정은 일시적으로 차단되었습니다. 잠시 후 다시 시도하거나 관리자에게 문의해 주세요.")
         };
 
     private static readonly IReadOnlyDictionary<string, string> FallbackMessages = CreateLocalizedMessage(

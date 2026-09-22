@@ -40,6 +40,31 @@ public class ServiceConfiguration
     public string? PaymentApiBaseUrl { get; set; }
 
     /// <summary>
+    /// XAUAT.LoginApi 的基础地址（如 http://xauat-loginapi:8080）。
+    /// <para>
+    /// 与支付不同，登录**保留回退**：留空时仍直接打 Flask 的 https://schedule.xauat.site。
+    /// 灰度期间改这一个环境变量就能在两个实现之间来回切，回滚不需要回退镜像。
+    /// </para>
+    /// </summary>
+    public string? LoginApiBaseUrl { get; set; }
+
+    /// <summary>
+    /// Flask 的登录地址——<see cref="LoginApiBaseUrl"/> 留空时的回退目标。
+    /// </summary>
+    public const string FlaskLoginBaseUrl = "https://schedule.xauat.site";
+
+    /// <summary>
+    /// 实际使用的登录服务地址：配了 <see cref="LoginApiBaseUrl"/> 就用它，否则回落 Flask。
+    /// </summary>
+    /// <remarks>
+    /// 单独提出来是为了让"留空 = 维持现状"这条灰度规则可被直接测到，
+    /// 而不是藏在 DI 注册的 lambda 里。
+    /// </remarks>
+    public string ResolvedLoginApiBaseUrl => string.IsNullOrEmpty(LoginApiBaseUrl)
+        ? FlaskLoginBaseUrl
+        : LoginApiBaseUrl;
+
+    /// <summary>
     /// 从环境变量中创建ServiceConfiguration实例
     /// </summary>
     /// <returns>ServiceConfiguration实例</returns>
@@ -52,7 +77,8 @@ public class ServiceConfiguration
             EnablePrometheus = EnvironmentVariableHelper.GetBoolOrDefault(true, "PROMETHEUS_ENABLED", "Prometheus__Enabled"),
             EnableLogging = EnvironmentVariableHelper.GetBoolOrDefault(true, "LOGGING_ENABLED", "Logging__Enabled"),
             TestAccount = EnvironmentVariableHelper.BuildTestAccountOptions(),
-            PaymentApiBaseUrl = EnvironmentVariableHelper.GetString("PAYMENT_API_BASE_URL", "PaymentApi__BaseUrl")
+            PaymentApiBaseUrl = EnvironmentVariableHelper.GetString("PAYMENT_API_BASE_URL", "PaymentApi__BaseUrl"),
+            LoginApiBaseUrl = EnvironmentVariableHelper.GetString("LOGIN_API_BASE_URL", "LoginApi__BaseUrl")
         };
     }
 }
