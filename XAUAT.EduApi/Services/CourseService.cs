@@ -40,7 +40,7 @@ public class CourseService(
             return await cacheService.GetOrCreateAsync(
                 CacheKeys.Courses(studentId),
                 async () => await FetchCoursesFromRemoteAsync(studentId, cookie, language),
-                TimeSpan.FromDays(1));
+                TimeSpan.FromHours(8));
         }
 
         return await FetchCoursesFromRemoteAsync(studentId, cookie, language);
@@ -74,7 +74,7 @@ public class CourseService(
 
         foreach (var item in courses)
         {
-            item.WeekIndexes = item.WeekIndexes.OrderBy(x => x).ToList();
+            item.WeekIndexes = [.. item.WeekIndexes.OrderBy(x => x)];
             item.Room = string.IsNullOrEmpty(item.Room) ? "未知" : item.Room.Replace("*", "");
         }
 
@@ -88,7 +88,7 @@ public class CourseService(
         string studentId, string cookie, string language)
     {
         // 为每个请求创建新的 HttpClient 以避免并发问题
-        using var newClient = httpClientFactory.CreateClient();
+        var newClient = httpClientFactory.CreateClient();
         newClient.SetRealisticHeaders();
         newClient.DefaultRequestHeaders.Add("Cookie", cookie);
         newClient.Timeout = HttpTimeouts.EduSystem;
@@ -112,6 +112,8 @@ public class CourseService(
                 jsonString.ThrowIfAuthOrRateLimited();
 
                 var jsonResponse = JsonConvert.DeserializeObject<CourseResponse>(jsonString);
+                
+                newClient.Dispose();
 
                 return jsonResponse?.StudentTableVm == null
                     ? throw new InvalidOperationException("未找到课程数据")
