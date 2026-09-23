@@ -1,4 +1,4 @@
-name: Build and Deploy
+name: Build image
 
 on:
   pull_request:
@@ -12,7 +12,7 @@ permissions:
   packages: write
 
 concurrency:
-  group: production-deploy
+  group: build-image
   cancel-in-progress: false
 
 env:
@@ -40,8 +40,6 @@ jobs:
     needs: test
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    outputs:
-      image: ${{ steps.image.outputs.image }}
     steps:
       - uses: actions/checkout@v4
       - name: Resolve image name
@@ -67,58 +65,3 @@ jobs:
             ${{ steps.image.outputs.image }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-  deploy:
-    name: Deploy to production
-    needs: publish
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    environment: production
-    env:
-      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
-      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
-      DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-      GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
-      # 与 XAUAT.PaymentAPI / XAUAT.LoginApi 共用的 docker 网络，
-      # 让 PAYMENT_API_BASE_URL 与 LOGIN_API_BASE_URL 里的服务名可解析
-      NETWORK_NAME: xauat-net
-    steps:
-      - uses: actions/checkout@v4
-      - name: Configure SSH
-        shell: bash
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
-        run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/known_hosts
-      - name: Upload Compose definition
-        shell: bash
-        run: |
-          ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$DEPLOY_PATH'"
-          scp -P "$DEPLOY_PORT" deploy/docker-compose.production.yml "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/docker-compose.yml"
-      - name: Pull image and restart service
-        shell: bash
-        env:
-          IMAGE: ${{ needs.publish.outputs.image }}:${{ github.sha }}
-          GHCR_USERNAME: ${{ github.actor }}
-        run: |
-          ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
-            "DEPLOY_PATH='$DEPLOY_PATH' IMAGE='$IMAGE' GHCR_USERNAME='$GHCR_USERNAME' NETWORK_NAME='$NETWORK_NAME' GHCR_PULL_TOKEN='$GHCR_PULL_TOKEN' bash -se" <<'REMOTE_SCRIPT'
-          set -o pipefail
-          cd "$DEPLOY_PATH"
-          test -f .env || { echo "Missing $DEPLOY_PATH/.env" >&2; exit 1; }
-
-          # 共享网络由 EduApi / PaymentAPI 两个栈共用，幂等创建
-          docker network inspect "$NETWORK_NAME" >/dev/null 2>&1 || docker network create "$NETWORK_NAME"
-
-          printf '%s' "$GHCR_PULL_TOKEN" | docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin
-          IMAGE="$IMAGE" NETWORK_NAME="$NETWORK_NAME" docker compose pull app
-          IMAGE="$IMAGE" NETWORK_NAME="$NETWORK_NAME" docker compose up -d --no-build --remove-orphans app
-          docker image prune --force
-          docker logout ghcr.io
-          REMOTE_SCRIPT

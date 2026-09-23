@@ -54,40 +54,79 @@ cp .env.example .env
 
 ## 部署方式
 
-### Docker 部署（推荐）
+### CI：只构建镜像，不部署
+
+`.github/workflows/deploy-production.yml` 在推送到 `master` 时先跑测试，再把镜像推送到 GHCR
+（`ghcr.io/lumaristeam/xauat.eduapi`，tag 为本次 commit SHA 与 `latest`）。
+**它不会碰服务器**——部署由人工在服务器上执行，发布时机因此由你决定，CI 也不必持有服务器私钥。
+
+### 服务器部署
+
+本服务是三个服务里唯一映射宿主机端口的一个（对外提供 API），另外两个只经共享网络被调用。
+
+首次部署前，把部署目录所需的三样东西放到服务器上：
 
 ```bash
-docker build -t xauat-edu-api .
-docker run -d -p 8080:8080 xauat-edu-api
+sudo mkdir -p /opt/xauat-eduapi/deploy
+sudo chown -R "$USER" /opt/xauat-eduapi
+cd /opt/xauat-eduapi/deploy
+
+# 1) compose 定义与部署脚本（从仓库 deploy/ 目录复制）
+scp <本机>:XAUAT.EduApi/deploy/docker-compose.production.yml .
+scp <本机>:XAUAT.EduApi/deploy/build_from_ghcr.sh .
+chmod +x build_from_ghcr.sh
+
+# 2) 环境文件
+curl -fsSL <仓库里的 .env.example> -o .env
+sed -i 's/^ASPNETCORE_ENVIRONMENT=.*/ASPNETCORE_ENVIRONMENT=Production/' .env
+sed -i 's#^PAYMENT_API_BASE_URL=.*#PAYMENT_API_BASE_URL=http://xauat-paymentapi:8080#' .env
+chmod 600 .env
 ```
 
-### GitHub Actions 自动部署
+`PAYMENT_API_BASE_URL` 是必需项，缺失时 EduApi 启动即失败。`LOGIN_API_BASE_URL` 留空则
+登录仍直连 Flask，填 `http://xauat-loginapi:8080` 则转发到 XAUAT.LoginApi。
 
-仓库包含生产工作流 `.github/workflows/deploy-production.yml`：提交到 `master` 后会先执行测试，再构建并推送 GHCR 镜像，最后通过 SSH 让服务器拉取该次提交对应的镜像并重启容器。
-
-首次部署前，在服务器创建部署目录及仅供服务器使用的环境文件：
+之后每次发布：
 
 ```bash
-sudo mkdir -p /opt/xauat-eduapi
-sudo chown "$USER" /opt/xauat-eduapi
-cp .env.example /opt/xauat-eduapi/.env
-sed -i 's/^ASPNETCORE_ENVIRONMENT=.*/ASPNETCORE_ENVIRONMENT=Production/' /opt/xauat-eduapi/.env
-chmod 600 /opt/xauat-eduapi/.env
+cd /opt/xauat-eduapi/deploy
+./build_from_ghcr.sh                                            # 拉 :latest
+./build_from_ghcr.sh ghcr.io/lumaristeam/xauat.eduapi:<sha>     # 指定版本，也是回滚方式
+APP_PORT=9090 ./build_from_ghcr.sh                              # 改宿主机端口（默认 8080）
 ```
 
-在 GitHub 仓库的 `Settings -> Environments -> production` 中配置以下 Secrets：
+脚本会幂等创建共享网络 `xauat-net`、拉取镜像、`docker compose up -d`，并等到日志里出现
+`Now listening on` 才报成功；末尾会打印自检命令与准确的回滚命令。
 
-| Secret | 用途 |
-|-------|------|
-| `DEPLOY_HOST` | 服务器地址 |
-| `DEPLOY_PORT` | SSH 端口，例如 `22` |
-| `DEPLOY_USER` | 可运行 Docker 的 SSH 用户 |
-| `DEPLOY_PATH` | 部署目录，例如 `/opt/xauat-eduapi` |
-| `DEPLOY_SSH_PRIVATE_KEY` | 对应部署用户的 Ed25519 私钥 |
-| `DEPLOY_KNOWN_HOSTS` | `ssh-keyscan -H <服务器地址>` 的输出 |
-| `GHCR_PULL_TOKEN` | 仅具 `read:packages` 权限、可拉取该镜像的 GitHub token |
+### 镜像凭据：GHCR_PULL_TOKEN
 
-服务器应已安装 Docker Engine 和 Docker Compose 插件，且部署用户有运行 Docker 的权限。将首次生成的 GHCR 包设置为允许该仓库访问；若镜像设为公开，`GHCR_PULL_TOKEN` 仍可保留为最小权限 token。生产配置写在服务器 `/opt/xauat-eduapi/.env`，不要提交到仓库。可选的 `APP_PORT` 用于调整宿主机暴露端口，默认为 `8080`。
+镜像在 GHCR 上默认继承仓库可见性（私有），服务器拉取前必须先登录。CI 构建时用的
+`GITHUB_TOKEN` 只在当次 Actions 运行内有效、离开 GitHub 即作废，所以服务器需要一张
+自己申请的长期只读凭据：
+
+1. GitHub 右上角头像 → `Settings` → `Developer settings` → `Personal access tokens`
+   → **Tokens (classic)** → `Generate new token (classic)`
+2. Scopes **只勾 `read:packages`**（不要 `repo`、不要 `write:packages`），设置一个到期日
+3. 首次推送生成的包还需授权给仓库访问：package 页面 → `Package settings`
+   → `Manage Actions access`
+4. 部署时传入：
+
+```bash
+GHCR_PULL_TOKEN=<token> GHCR_USERNAME=<你的 GitHub 用户名> ./build_from_ghcr.sh
+```
+
+脚本用完会 `docker logout ghcr.io`；不传这两个变量则沿用本机已有的 docker 凭据
+（即此前手动 `docker login ghcr.io` 过）。
+
+> GitHub Packages 官方文档明确只支持 classic token，**fine-grained token 不在支持之列**。
+
+### 从源码构建（备选）
+
+服务器上没有 ghcr 凭据、或就是要跑当前工作区代码时，用仓库根目录的 `build.sh`：
+`git pull` → `docker build` → 换掉旧容器，环境文件是 `prod.env`。它与 `deploy/build_from_ghcr.sh`
+是两条并行路径，容器名同为 `xauat-eduapi`，互相不能叠加，切换前需 `docker rm -f xauat-eduapi`。
+
+服务器需已安装 Docker Engine 与 Compose v2 插件，且执行用户有运行 Docker 的权限。
 
 ### 本地运行
 
