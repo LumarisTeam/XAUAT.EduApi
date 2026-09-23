@@ -53,7 +53,8 @@ dotnet run -c Release --project Tests/XAUAT.EduApi.Tests.csproj -- --filter "*Pe
 | Controller | Purpose |
 |------------|---------|
 | `LoginController` | SSO login, returns cookies for subsequent requests |
-| `CourseController` | Course schedules |
+| `CourseController` | Course schedules, campus timetable (`ScheduleTime`) |
+| `CalendarController` | ICS calendar subscription (`v1/course/Calendar`) |
 | `ScoreController` | Exam scores |
 | `ExamController` | Exam arrangements |
 | `ProgramController` | Training programs / degree plans |
@@ -96,6 +97,7 @@ The project uses **DotNetEnv** to load configuration from a `.env` file at the s
 | `PROMETHEUS_ENABLED` | Enable Prometheus metrics (default true) |
 | `PAYMENT_API_BASE_URL` | XAUAT.PaymentAPI base URL; **required** — startup fails if missing |
 | `LOGIN_API_BASE_URL` | XAUAT.LoginApi base URL; if empty, falls back to the Flask at `schedule.xauat.site` |
+| `START`, `END` | Semester first/last day (`yyyy-MM-dd`). Read by `IInfoService.GetTime()`; `START` is also the anchor the calendar expands week numbers from, so a wrong value shifts every course event by whole weeks |
 
 ### Database
 
@@ -126,6 +128,14 @@ Cache key format: `eduapi:{module}:{entity}:{identifier}`. All keys are defined 
 - Map POI data uses 24h TTL
 
 See `CACHE_STRATEGY.md` for full details.
+
+## Time zone
+
+The container image sets no `TZ` and ships no tzdata, so `DateTime.Now` inside the container is **UTC**
+while every domain time (timetable, exams, semester window) is Asia/Shanghai wall-clock. Use
+`SchoolClock.Now` (`XAUAT.EduApi/Services/SchoolClock.cs`) instead of `DateTime.Now` for anything
+that means "now" in school terms. Do not add `TZ=Asia/Shanghai` to the image: it would also move
+Serilog timestamps and every other `DateTime.Now` in the process.
 
 ## Authentication Flow
 

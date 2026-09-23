@@ -55,15 +55,18 @@ public class CalendarService(
         var exams = await examsTask;
 
         var onlyFuture = string.Equals(filter, "future", StringComparison.Ordinal);
-        var events = new List<IcsEvent>(exams.Exams.Count + courses.Count);
 
-        events.AddRange(BuildExamEvents(exams.Exams, onlyFuture));
-        events.AddRange(BuildCourseEvents(courses, onlyFuture));
+        var examEvents = BuildExamEvents(exams.Exams, onlyFuture);
+        var courseEvents = BuildCourseEvents(courses, onlyFuture);
+
+        var events = new List<IcsEvent>(examEvents.Count + courseEvents.Count);
+        events.AddRange(examEvents);
+        events.AddRange(courseEvents);
 
         var content = IcsCalendarWriter.Create(events, CalendarName, AppleColor, DateTimeOffset.UtcNow);
 
-        logger.LogInformation("日历生成完成: {ExamCount} 场考试, {CourseCount} 个课程事件",
-            exams.Exams.Count, events.Count - exams.Exams.Count);
+        logger.LogInformation("日历生成完成: 考试 {ExamCount} 场 → {ExamEventCount} 个事件; 课程 {CourseCount} 门 → {CourseEventCount} 个事件",
+            exams.Exams.Count, examEvents.Count, courses.Count, courseEvents.Count);
 
         return content;
     }

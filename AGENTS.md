@@ -71,6 +71,13 @@ The system delegates the SSO handshake to a separate login service:
 |----------|---------|
 | `SQL` | PostgreSQL connection string (production) |
 | `REDIS` | Redis connection string |
+| `START`, `END` | Semester first/last day (`yyyy-MM-dd`). `START` anchors the calendar's week-number expansion |
+| `PAYMENT_API_BASE_URL` | XAUAT.PaymentAPI base URL; **required** — startup fails if missing |
+
+### Time zone
+
+The container sets no `TZ` and has no tzdata, so `DateTime.Now` is **UTC** inside it, while timetable,
+exam and semester times are Asia/Shanghai wall-clock. Use `SchoolClock.Now` for "now" in school terms.
 
 ### Caching Strategy
 

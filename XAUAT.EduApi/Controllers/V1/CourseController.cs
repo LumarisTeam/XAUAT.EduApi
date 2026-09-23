@@ -1,4 +1,4 @@
-﻿using EduApi.Data.Models;
+using EduApi.Data.Models;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Mvc;
 using XAUAT.EduApi.Extensions;

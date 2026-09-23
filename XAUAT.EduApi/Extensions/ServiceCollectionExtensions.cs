@@ -1,4 +1,4 @@
-﻿using EduApi.Data;
+using EduApi.Data;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
