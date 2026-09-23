@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
 
+# 服务器上也可能以 `sh build.sh` 调用，而 Debian/Ubuntu 的 /bin/sh 是 dash：
+# 它没有 [[ ]] / (( )) / $SECONDS，会在第一次用到时就报错退出。
+# 检测到当前不是 bash 就用 bash 重新执行自己，让 `sh x.sh` 与 `./x.sh` 完全等价。
+if [ -z "${BASH_VERSION:-}" ]; then
+  exec bash "$0" "$@"
+fi
+
 PART="${PART:-${1:-28080}}"
 if [[ ! "$PART" =~ ^[0-9]+$ ]] || (( PART < 1 || PART > 65535 )); then
   echo "错误：PART 必须是 1 到 65535 之间的端口号。"
