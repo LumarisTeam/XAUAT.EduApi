@@ -91,38 +91,43 @@ chmod 600 .env
 ```bash
 cd /opt/xauat-eduapi/deploy
 ./build_from_ghcr.sh                                            # 拉 :latest
-./build_from_ghcr.sh ghcr.io/lumaristeam/xauat.eduapi:<sha>     # 指定版本，也是回滚方式
+./build_from_ghcr.sh ccr.ccs.tencentyun.com/lumaris/xauat.eduapi:<sha>   # 指定版本，也是回滚方式
 APP_PORT=9090 ./build_from_ghcr.sh                              # 改宿主机端口（默认 8080）
 ```
 
 脚本会幂等创建共享网络 `xauat-net`、拉取镜像、`docker compose up -d`，并等到日志里出现
 `Now listening on` 才报成功；末尾会打印自检命令与准确的回滚命令。
 
-### 镜像凭据：GHCR_PULL_TOKEN
+### 镜像仓库与凭据
 
-镜像在 GHCR 上默认继承仓库可见性（私有），服务器拉取前必须先登录。CI 构建时用的
-`GITHUB_TOKEN` 只在当次 Actions 运行内有效、离开 GitHub 即作废，所以服务器需要一张
-自己申请的长期只读凭据：
+CI 把同一批 tag 推**两份**：ghcr.io 作归档，腾讯云 TCR 供国内服务器拉取。
+服务器默认从 TCR 拉——ghcr 的镜像层走 `pkg-containers.githubusercontent.com`，
+在国内基本拉不动（命令能通、认证也能过，就是层下不来）。
 
-1. GitHub 右上角头像 → `Settings` → `Developer settings` → `Personal access tokens`
-   → **Tokens (classic)** → `Generate new token (classic)`
-2. Scopes **只勾 `read:packages`**（不要 `repo`、不要 `write:packages`），设置一个到期日
-3. 首次推送生成的包还需授权给仓库访问：package 页面 → `Package settings`
-   → `Manage Actions access`
-4. 部署时传入：
+TCR 是私有仓库，服务器需要一组凭据：
+
+1. 腾讯云控制台 → 容器镜像服务 TCR → 个人版实例 → 实例管理 → **初始化密码**
+   （忘了就「更多 → 重置登录密码」）
+2. **用户名是当前登录的腾讯云账号 ID**
+3. 部署时传入：
 
 ```bash
-GHCR_PULL_TOKEN=<token> GHCR_USERNAME=<你的 GitHub 用户名> ./build_from_ghcr.sh
+PULL_TOKEN=<你设的固定密码> PULL_USERNAME=<腾讯云账号ID> ./build_from_ghcr.sh
 ```
 
-脚本用完会 `docker logout ghcr.io`；不传这两个变量则沿用本机已有的 docker 凭据
-（即此前手动 `docker login ghcr.io` 过）。
+脚本用完会 `docker logout <registry>`；不传这两个变量则沿用本机已有的 docker 凭据
+（即此前手动 `docker login ccr.ccs.tencentyun.com` 过）。
 
-> GitHub Packages 官方文档明确只支持 classic token，**fine-grained token 不在支持之列**。
+要改用 ghcr 那份就加 `USE_GHCR=1`，凭据换成一张 GitHub classic PAT
+（**只勾 `read:packages`**——GitHub Packages 不支持 fine-grained token）：
+
+```bash
+USE_GHCR=1 PULL_TOKEN=<classic PAT> PULL_USERNAME=<你的 GitHub 用户名> ./build_from_ghcr.sh
+```
 
 ### 从源码构建（备选）
 
-服务器上没有 ghcr 凭据、或就是要跑当前工作区代码时，用仓库根目录的 `build.sh`：
+服务器上没有 registry 凭据、或就是要跑当前工作区代码时，用仓库根目录的 `build.sh`：
 `git pull` → `docker build` → 换掉旧容器，环境文件是 `prod.env`。它与 `deploy/build_from_ghcr.sh`
 是两条并行路径，容器名同为 `xauat-eduapi`，互相不能叠加，切换前需 `docker rm -f xauat-eduapi`。
 
