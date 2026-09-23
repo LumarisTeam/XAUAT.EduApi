@@ -1,4 +1,4 @@
-using EduApi.Data;
+﻿using EduApi.Data;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -145,6 +145,9 @@ public static class ServiceCollectionExtensions
             });
             services.AddSingleton<IClassTimeService, ClassTimeService>();
             services.AddScoped<ICourseService, CourseService>();
+            // 日历订阅：课程/考试数据复用上面的 CourseService/ExamService，
+            // 只有 ICS 组装是本服务自己的（见 Services/CalendarService.cs）
+            services.AddScoped<ICalendarService, CalendarService>();
             services.AddScoped<IScoreService, ScoreService>();
             services.AddScoped<IBusService, BusService>();
             services.AddScoped<IRedisService, RedisService>();

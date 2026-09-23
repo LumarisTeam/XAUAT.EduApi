@@ -1,4 +1,4 @@
-using EduApi.Data.Models;
+﻿using EduApi.Data.Models;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Mvc;
 using XAUAT.EduApi.Extensions;
@@ -73,13 +73,6 @@ public class CourseController(
             return StatusCode(StatusCodes.Status500InternalServerError,
                 ErrorResponse(ApiCodes.InternalError, Message(ApiMessageKey.InternalServerError)));
         }
-    }
-
-    [HttpGet("Calendar")]
-    public ActionResult GetCalendarSubscription(string username, string password, string type = "webcal")
-    {
-        if (type != "webcal") type = "https";
-        return Redirect($"{type}://schedule.xauat.site/class?school=xauat&username={username}&password={password}");
     }
 
     /// <summary>

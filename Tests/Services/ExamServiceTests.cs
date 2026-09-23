@@ -573,4 +573,83 @@ public class ExamServiceTests
     }
 
     #endregion
+
+    // ------------------------------------------------------------------
+    // ParseExamTimeRange：日历要的是**校本部本地墙钟**的起止，和 ExamRecord.ExamTime
+    // 那条 UTC 路径不是一回事。下面的用例就是把这两条语义分开钉住。
+    // ------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("2026-06-20 09:00-11:00")]   // 表格解析路径（ParseNow 已把 ~ 换成 -）
+    [InlineData("2026-06-20 09:00~11:00")]   // 上游 JS 的原始形态
+    [InlineData("2026-06-20 09:00～11:00")]  // 全角波浪号
+    [InlineData("2026-06-20 09:00 - 11:00")] // 带空格的连字符
+    public void ParseExamTimeRange_ShouldSplitEveryKnownSeparator(string timeRaw)
+    {
+        var (start, end) = ExamService.ParseExamTimeRange(timeRaw);
+
+        Assert.Equal(new DateTime(2026, 6, 20, 9, 0, 0), start);
+        Assert.Equal(new DateTime(2026, 6, 20, 11, 0, 0), end);
+    }
+
+    [Fact]
+    public void ParseExamTimeRange_ShouldReturnLocalWallClock_NotUtc()
+    {
+        // 这条是防"考试 UID 整体偏移 8 小时"的哨兵：
+        // UID 里嵌的是起始时刻，若这里返回 UTC（06:00 而不是 14:00），
+        // 所有老订户都会看到重复的考试事件。
+        var (start, end) = ExamService.ParseExamTimeRange("2026-07-13 14:00-16:00");
+
+        Assert.Equal(DateTimeKind.Unspecified, start.Kind);
+        Assert.Equal(14, start.Hour);
+        Assert.Equal(16, end.Hour);
+        Assert.Equal(new DateTime(2026, 7, 13), start.Date);
+    }
+
+    [Fact]
+    public void ParseExamTimeRange_ShouldParseSlashSeparatedDate()
+    {
+        var (start, end) = ExamService.ParseExamTimeRange("2026/07/13 14:00~16:00");
+
+        Assert.Equal(new DateTime(2026, 7, 13, 14, 0, 0), start);
+        Assert.Equal(new DateTime(2026, 7, 13, 16, 0, 0), end);
+    }
+
+    [Fact]
+    public void ParseExamTimeRange_ShouldFallBackToStartAsEnd_WhenOnlyStartGiven()
+    {
+        var (start, end) = ExamService.ParseExamTimeRange("2026-06-20 08:00");
+
+        Assert.Equal(new DateTime(2026, 6, 20, 8, 0, 0), start);
+        Assert.Equal(start, end);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("待定")]
+    public void ParseExamTimeRange_ShouldReturnMinValue_WhenUnparsable(string timeRaw)
+    {
+        var (start, end) = ExamService.ParseExamTimeRange(timeRaw);
+
+        Assert.Equal(DateTime.MinValue, start);
+        Assert.Equal(DateTime.MinValue, end);
+    }
+
+    [Fact]
+    public void ParseExamTime_ShouldNotChangeExamRecordUtcSemantics()
+    {
+        // 同一条串走两条路径：日历要本地 14:00，ExamRecord.ExamTime 要 UTC 06:00。
+        // 后者的语义由 GetExamArrangementsAsync_ShouldParseExamRows_WithoutTbody 守着，
+        // 这里只确认新加的范围解析没有把"本地"这条语义带回去污染它。
+        var (localStart, localEnd) = ExamService.ParseExamTimeRange("2026-07-13 14:00-16:00");
+
+        Assert.Equal(DateTimeKind.Unspecified, localStart.Kind);
+        Assert.Equal(14, localStart.Hour);
+
+        // 本地 14:00 对应的 UTC 就是 06:00 —— 两者相差 8 小时，绝不能混用
+        var asUtc = TimeZoneInfo.ConvertTimeToUtc(localStart, SchoolClock.TimeZone);
+        Assert.Equal(6, asUtc.Hour);
+        Assert.Equal(localEnd.Date, localStart.Date);
+    }
 }

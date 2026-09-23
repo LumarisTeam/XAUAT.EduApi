@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text.RegularExpressions;
 using EduApi.Data;
 using EduApi.Data.Models;
@@ -36,7 +36,15 @@ public class ExamService(
     : IExamService
 {
     private const string BaseUrl = "https://swjw.xauat.edu.cn";
-    private static readonly TimeZoneInfo SchoolTimeZone = CreateSchoolTimeZone();
+
+    /// <summary>
+    /// 考试安排页。<b>尾斜杠不能省</b>：实测 <c>/for-std/exam-arrange</c>（无斜杠）会返回
+    /// HTTP 200，但内容其实是**「学籍信息」**页——既不重定向也不报错，解析器于是静默返回空列表，
+    /// 表现为"日历里从来没有考试事件"。这条是从 XAUAT.LoginApi 的抓取报告里带过来的。
+    /// </summary>
+    private const string ExamArrangePath = "/student/for-std/exam-arrange/";
+    /// <summary>校本部时区。实现已抽到 <see cref="SchoolClock"/>，此处保留别名以免改动过大。</summary>
+    private static TimeZoneInfo SchoolTimeZone => SchoolClock.TimeZone;
 
     private readonly IStudentRateLimitExecutor _rateLimitExecutor =
         rateLimitExecutor ?? NoOpStudentRateLimitExecutor.Instance;
@@ -162,7 +170,7 @@ public class ExamService(
     {
         try
         {
-            var url = $"{BaseUrl}/student/for-std/exam-arrange/";
+            var url = $"{BaseUrl}{ExamArrangePath}";
             if (!string.IsNullOrEmpty(id))
             {
                 url += $"info/{id}?";
@@ -362,41 +370,95 @@ public class ExamService(
     }
 
     private static DateTime ParseExamTime(string timeRaw)
+        => ToUtcExamTime(ParseExamTimeRange(timeRaw).Start);
+
+    /// <summary>
+    /// 把考试时间串解析为**校本部本地时间**的起止时刻。
+    /// <para>
+    /// 上游给的原始形态是 <c>2026-07-13 14:00~16:00</c>；表格解析那条路径已经把
+    /// <c>~</c> 换成 <c>-</c>，所以三种分隔符都要认（见 <see cref="SplitExamTimeRange"/>）。
+    /// 结束时刻通常只写 <c>16:00</c>，需要用开始那段的日期补全。
+    /// </para>
+    /// <para>
+    /// 返回值是**墙上时间**（<see cref="DateTimeKind.Unspecified"/>，语义为 Asia/Shanghai），
+    /// 不是 UTC：日历要把它原样写进 ICS 的 <c>DTSTART</c>，而 <see cref="ExamRecord.ExamTime"/>
+    /// 那条路径再另行转 UTC。<b>不要把这里改成返回 UTC</b>——ICS 的 UID 用的是本地时刻，
+    /// 换了时区基准会让已订阅用户看到重复事件。
+    /// </para>
+    /// </summary>
+    /// <returns>解析失败时返回 (<see cref="DateTime.MinValue"/>, <see cref="DateTime.MinValue"/>)。</returns>
+    public static (DateTime Start, DateTime End) ParseExamTimeRange(string timeRaw)
     {
         if (string.IsNullOrWhiteSpace(timeRaw))
-            return DateTime.MinValue;
+            return (DateTime.MinValue, DateTime.MinValue);
 
-        var startPart = timeRaw.Trim();
+        var (startText, endText) = SplitExamTimeRange(timeRaw);
 
-        // 2026-07-13 14:00~16:00
-        var rangeIndex = timeRaw.IndexOfAny(['~', '～']);
-        if (rangeIndex == -1)
-        {
-            // 如果没找到波浪号，找连字符，但要确保它不是日期里的连字符
-            // 技巧：考试时间段的连字符通常在空格后面，或者我们可以找最后一个 '-'（前提是它后面没有其他日期特征）
-            // 最稳妥的是找 " - " 或者看 '-' 是不是出现在空格和具体时间之后
-            rangeIndex = timeRaw.IndexOf(" - ", StringComparison.Ordinal);
-            if (rangeIndex == -1 && timeRaw.Count(c => c == '-') > 2)
-            {
-                // 如果有超过两个横杠（如 2026-07-13 14:00-16:00），说明最后一个是时间段分隔符
-                rangeIndex = timeRaw.LastIndexOf('-');
-            }
-        }
+        if (!TryParseLocalDateTime(startText, null, out var start))
+            return (DateTime.MinValue, DateTime.MinValue);
 
-        if (rangeIndex > 0)
-        {
-            startPart = timeRaw[..rangeIndex].Trim();
-        }
+        if (endText is null)
+            return (start, start);
 
-        if (DateTime.TryParseExact(startPart, "yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture,
-                DateTimeStyles.AllowWhiteSpaces, out var result) ||
-            DateTime.TryParseExact(startPart, "yyyy/MM/dd HH:mm", CultureInfo.InvariantCulture,
-                DateTimeStyles.AllowWhiteSpaces, out result) ||
-            DateTime.TryParse(startPart, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out result))
-            return ToUtcExamTime(result);
-
-        return DateTime.SpecifyKind(DateTime.MinValue, DateTimeKind.Utc);
+        // 结束时刻通常只有 "16:00"，补上开始那段的日期前缀
+        return TryParseLocalDateTime(endText, ExtractDatePrefix(startText), out var end)
+            ? (start, end)
+            : (start, start);
     }
+
+    /// <summary>
+    /// 按 <c>~</c>/<c>～</c> → <c>" - "</c> → 最后一个 <c>-</c> 的顺序切出起止两段。
+    /// 最后一种是为了 <c>2026-07-13 14:00-16:00</c>：日期里本来就有两个连字符，
+    /// 所以只有"连字符多于两个"时才把最后一个当作时间段分隔符。
+    /// </summary>
+    private static (string Start, string? End) SplitExamTimeRange(string timeRaw)
+    {
+        var raw = timeRaw.Trim();
+
+        var tildeIndex = raw.IndexOfAny(['~', '～']);
+        if (tildeIndex > 0)
+            return (raw[..tildeIndex].Trim(), raw[(tildeIndex + 1)..].Trim());
+
+        var spacedHyphenIndex = raw.IndexOf(" - ", StringComparison.Ordinal);
+        if (spacedHyphenIndex > 0)
+            return (raw[..spacedHyphenIndex].Trim(), raw[(spacedHyphenIndex + 3)..].Trim());
+
+        if (raw.Count(c => c == '-') > 2)
+        {
+            var lastHyphenIndex = raw.LastIndexOf('-');
+            if (lastHyphenIndex > 0)
+                return (raw[..lastHyphenIndex].Trim(), raw[(lastHyphenIndex + 1)..].Trim());
+        }
+
+        return (raw, null);
+    }
+
+    /// <summary>取 <c>"2026-07-13 14:00"</c> 里的日期部分。</summary>
+    private static string? ExtractDatePrefix(string text)
+    {
+        var lastSpace = text.LastIndexOf(' ');
+        return lastSpace > 0 ? text[..lastSpace] : null;
+    }
+
+    private static bool TryParseLocalDateTime(string text, string? datePrefix, out DateTime value)
+    {
+        // 只在结束段（形如 "16:00"、自身不带空格）时才补前缀，避免把完整时间串拼坏
+        if (!string.IsNullOrEmpty(datePrefix) && !text.Contains(' '))
+        {
+            var composed = $"{datePrefix} {text}";
+            if (TryParseLocalDateTimeCore(composed, out value))
+                return true;
+        }
+
+        return TryParseLocalDateTimeCore(text, out value);
+    }
+
+    private static bool TryParseLocalDateTimeCore(string text, out DateTime value)
+        => DateTime.TryParseExact(text, "yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture,
+               DateTimeStyles.AllowWhiteSpaces, out value) ||
+           DateTime.TryParseExact(text, "yyyy/MM/dd HH:mm", CultureInfo.InvariantCulture,
+               DateTimeStyles.AllowWhiteSpaces, out value) ||
+           DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out value);
 
     private static DateTime ToUtcExamTime(DateTime examTime)
     {
@@ -411,28 +473,6 @@ public class ExamService(
         };
     }
 
-    private static TimeZoneInfo CreateSchoolTimeZone()
-    {
-        foreach (var timeZoneId in new[] { "Asia/Shanghai", "China Standard Time" })
-        {
-            try
-            {
-                return TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
-            }
-            catch (TimeZoneNotFoundException)
-            {
-            }
-            catch (InvalidTimeZoneException)
-            {
-            }
-        }
-
-        return TimeZoneInfo.CreateCustomTimeZone(
-            "Asia/Shanghai",
-            TimeSpan.FromHours(8),
-            "China Standard Time",
-            "China Standard Time");
-    }
 }
 
 public static class SemesterModelStatic
