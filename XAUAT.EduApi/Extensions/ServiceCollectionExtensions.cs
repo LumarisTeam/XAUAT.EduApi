@@ -108,6 +108,13 @@ public static class ServiceCollectionExtensions
         /// <returns>服务集合</returns>
         public IServiceCollection AddBusinessServices(ServiceConfiguration configuration)
         {
+            // 把配置本身也放进容器：此前它只在 Program.cs 里以局部变量存在，谁都注入不到，
+            // 而现在 HttpLoginAdminService 要读它判断 LOGIN_API_BASE_URL 是否配置。
+            // 注册在这里（而不是 Program.cs）是为了让 AddAllServices 自成闭环——
+            // 组合根守护测试（Tests/Extensions/ServiceRegistrationTests.cs）只跑 AddAllServices，
+            // 放外面它就会缺这一项。
+            services.AddSingleton(configuration);
+
             services.AddSingleton<ILanguageResolver, HeaderLanguageResolver>();
             services.AddSingleton<IApiMessageLocalizer, ApiMessageLocalizer>();
             services.AddScoped<ICodeService, CodeService>();
@@ -126,6 +133,17 @@ public static class ServiceCollectionExtensions
                 client.BaseAddress = new Uri(configuration.ResolvedLoginApiBaseUrl);
                 // 20s：登录要跨 CAS → 教务两跳上游，HttpTimeouts 里 Slow 就是给登录/支付的
                 client.Timeout = HttpTimeouts.Slow;
+            });
+
+            // 登录服务的运维/统计数据（活跃用户数、封禁日志、解封）。与登录共用 base URL，
+            // 但刻意是独立的 typed client：调用方不同（管理端而非学生），失败语义也不同
+            // （连不上回 503 而不是 500），混在一个 client 里只会让两边的超时与重试互相迁就。
+            // 与上面同理，不挂 AddPolicyHandler——重试策略留在服务内部。
+            services.AddHttpClient<ILoginAdminService, HttpLoginAdminService>(client =>
+            {
+                client.BaseAddress = new Uri(configuration.ResolvedLoginApiBaseUrl);
+                // 10s：两个纯查询 GET + 一个解封，都不跨教务系统，用不上 Slow
+                client.Timeout = HttpTimeouts.Fast;
             });
 
             // 支付：EduApi 不再内置实现，一律转发到 XAUAT.PaymentAPI

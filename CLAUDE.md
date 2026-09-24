@@ -53,6 +53,7 @@ dotnet run -c Release --project Tests/XAUAT.EduApi.Tests.csproj -- --filter "*Pe
 | Controller | Purpose |
 |------------|---------|
 | `LoginController` | SSO login, returns cookies for subsequent requests |
+| `LoginOpsController` | Login-service ops (`v1/login-ops`): active user count, ban logs, unban. Proxies XAUAT.LoginApi; requires `MAP_ADMIN_TOKEN` |
 | `CourseController` | Course schedules, campus timetable (`ScheduleTime`) |
 | `CalendarController` | ICS calendar subscription (`v1/course/Calendar`) |
 | `ScoreController` | Exam scores |

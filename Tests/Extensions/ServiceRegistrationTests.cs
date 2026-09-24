@@ -97,6 +97,43 @@ public class ServiceRegistrationTests
     }
 
     [Fact]
+    public void LoginAdminService_ShouldBeResolvable()
+    {
+        // 与登录同理：HttpLoginAdminService 的构造签名里有一个可选参数
+        // （TimeSpan[]? retryDelays，生产注册里不存在），ActivatorUtilities 认不认默认值
+        // 只会在**请求时**暴露。它还要 ILoginAdminService 真的被注册过。
+        using var provider = BuildFullProvider();
+
+        Assert.IsType<HttpLoginAdminService>(provider.GetRequiredService<ILoginAdminService>());
+    }
+
+    [Fact]
+    public void LoginAdminClient_ShouldTargetFallbackLoginApi()
+    {
+        // BuildFullProvider 不设 LoginApiBaseUrl，因此应回落到 Flask。
+        // 注意封禁日志在回落模式下会由服务层拦住并回 503（见 LoginOpsNotConfiguredException），
+        // 这里只钉住"地址与超时确实来自 ResolvedLoginApiBaseUrl"。
+        using var provider = BuildFullProvider();
+        var factory = provider.GetRequiredService<IHttpClientFactory>();
+
+        var client = factory.CreateClient(nameof(ILoginAdminService));
+
+        Assert.Equal(new Uri(ServiceConfiguration.FlaskLoginBaseUrl), client.BaseAddress);
+        Assert.Equal(HttpTimeouts.Fast, client.Timeout);
+    }
+
+    [Fact]
+    public void ServiceConfiguration_ShouldBeResolvable()
+    {
+        // HttpLoginAdminService 靠注入它来判断 LOGIN_API_BASE_URL 是否配置。
+        // 此前 ServiceConfiguration 只是 Program.cs 里的一个局部变量，
+        // 谁都没法注入——这条守住它已经在 AddAllServices 里注册上了。
+        using var provider = BuildFullProvider();
+
+        Assert.NotNull(provider.GetRequiredService<ServiceConfiguration>());
+    }
+
+    [Fact]
     public void AllControllers_ShouldBeActivatable()
     {
         using var provider = BuildFullProvider();

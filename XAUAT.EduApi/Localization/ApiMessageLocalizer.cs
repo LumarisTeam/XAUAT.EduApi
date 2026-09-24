@@ -139,7 +139,34 @@ public class ApiMessageLocalizer : IApiMessageLocalizer
                 russian: "Эта учётная запись временно заблокирована. Повторите попытку позже или обратитесь к администратору.",
                 french: "Ce compte est temporairement banni. Veuillez réessayer plus tard ou contacter un administrateur.",
                 japanese: "このアカウントは一時的に利用停止されています。しばらくしてから再試行するか、管理者にお問い合わせください。",
-                korean: "이 계정은 일시적으로 차단되었습니다. 잠시 후 다시 시도하거나 관리자에게 문의해 주세요.")
+                korean: "이 계정은 일시적으로 차단되었습니다. 잠시 후 다시 시도하거나 관리자에게 문의해 주세요."),
+            [ApiMessageKey.LoginOpsTokenRequired] = CreateLocalizedMessage(
+                simplifiedChinese: "登录运维操作需要有效的 Token",
+                traditionalChinese: "登入維運操作需要有效的 Token",
+                english: "A valid token is required for login operations.",
+                german: "Für Login-Wartungsvorgänge ist ein gültiges Token erforderlich.",
+                russian: "Для операций обслуживания входа требуется действительный токен.",
+                french: "Un jeton valide est requis pour les opérations de connexion.",
+                japanese: "ログイン運用操作には有効なトークンが必要です。",
+                korean: "로그인 운영 작업에는 유효한 토큰이 필요합니다."),
+            [ApiMessageKey.LoginOpsUsernameRequired] = CreateLocalizedMessage(
+                simplifiedChinese: "缺少用户名",
+                traditionalChinese: "缺少使用者名稱",
+                english: "Username is required.",
+                german: "Benutzername ist erforderlich.",
+                russian: "Требуется имя пользователя.",
+                french: "Le nom d'utilisateur est requis.",
+                japanese: "ユーザー名が必要です。",
+                korean: "사용자 이름이 필요합니다."),
+            [ApiMessageKey.LoginOpsBaseUrlNotConfigured] = CreateLocalizedMessage(
+                simplifiedChinese: "未配置登录服务地址，封禁日志仅由 XAUAT.LoginApi 提供",
+                traditionalChinese: "未設定登入服務位址，封禁日誌僅由 XAUAT.LoginApi 提供",
+                english: "The login service address is not configured; ban logs are only available from XAUAT.LoginApi.",
+                german: "Die Adresse des Anmeldedienstes ist nicht konfiguriert; Sperrprotokolle gibt es nur über XAUAT.LoginApi.",
+                russian: "Адрес службы входа не настроен; журналы блокировок доступны только через XAUAT.LoginApi.",
+                french: "L'adresse du service de connexion n'est pas configurée ; les journaux de bannissement ne sont disponibles que via XAUAT.LoginApi.",
+                japanese: "ログインサービスのアドレスが設定されていません。BAN ログは XAUAT.LoginApi からのみ取得できます。",
+                korean: "로그인 서비스 주소가 설정되지 않았습니다. 차단 로그는 XAUAT.LoginApi에서만 제공됩니다."),
         };
 
     private static readonly IReadOnlyDictionary<string, string> FallbackMessages = CreateLocalizedMessage(
