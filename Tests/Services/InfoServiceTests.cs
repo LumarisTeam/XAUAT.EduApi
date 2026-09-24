@@ -100,7 +100,7 @@ public class InfoServiceTests
         Environment.SetEnvironmentVariable("END", endTime, EnvironmentVariableTarget.Process);
         
         // Act
-        var result = _infoService.IsGreatThanStart();
+        var result = _infoService.IsInSchool();
         
         // Assert
         Assert.False(result);
@@ -323,7 +323,7 @@ public class InfoServiceTests
         Environment.SetEnvironmentVariable("END", endTime, EnvironmentVariableTarget.Process);
         
         // Act
-        var result = _infoService.IsGreatThanStart();
+        var result = _infoService.IsInSchool();
         
         // Assert
         Assert.False(result);

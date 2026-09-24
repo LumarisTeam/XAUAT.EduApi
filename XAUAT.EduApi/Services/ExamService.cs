@@ -287,29 +287,17 @@ public class ExamService(
         var result = new List<ExamInfo>();
         try
         {
-            // 1. 使用正则表达式从内嵌的 <script> 中提取出 studentExamList 的 JSON 字符串
-            const string pattern = @"var studentExamList = (\[.*?\]);";
-            var match = Regex.Match(html, pattern, RegexOptions.Singleline);
+            // 1. 座位矩阵来自页面内嵌的 studentExamList JSON。
+            //    取不到**不算失败**：老页面或改版页面没有这段脚本时，下面退回表格里的座位文本，
+            //    否则整页考试都会被静默丢掉（历史事故：选择器一收紧，日历里的考试全没了）。
+            var examList = ParseStudentExamList(html);
 
-            if (!match.Success)
-            {
-                Console.WriteLine("未在网页脚本中找到座位数据矩阵！");
-                return result;
-            }
-
-            var jsonRaw = match.Groups[1].Value;
-            // 将强智系统中的单引号替换为标准 JSON 的双引号
-            jsonRaw = jsonRaw.Replace("'", "\"");
-
-            // 2. 反序列化为 C# 对象列表
-            var examList = JsonConvert.DeserializeObject<List<StudentExam>>(jsonRaw) ?? [];
-
-            // 3. 使用 HtmlAgilityPack 解析 HTML 表格，获取课程和时间等基础文本
+            // 2. 用 HtmlAgilityPack 解析 HTML 表格，获取课程、时间和地点等基础文本
             var htmlDoc = new HtmlDocument();
             htmlDoc.LoadHtml(html);
 
-            // 定位到表格的行
-            var rows = htmlDoc.DocumentNode.SelectNodes("//table[@id='exams']/tbody/tr");
+            // 表格可能自带 tbody，也可能把 tr 直接挂在 table 下——两种都要认
+            var rows = htmlDoc.DocumentNode.SelectNodes("//table[@id='exams']//tr");
             if (rows == null!) return [];
 
             foreach (var row in rows)
@@ -321,26 +309,20 @@ public class ExamService(
                 var time = tds[1].InnerText.Trim().Replace('~', '-');
                 var examPlace = tds[2].InnerText.Trim();
 
-                // 获取对应的座位 <td> 的 id（形如 seat-2666478）
-                var seatTdId = tds[3].GetAttributeValue("id", "");
-                var examId = long.Parse(seatTdId.Replace("seat-", ""));
+                // 3. 座位号优先取座位矩阵：表格第 4 列的 id（形如 seat-2666478）
+                //    就是两边关联的键；关联不上时退回该单元格的文本。
+                //    计算行列坐标（例如 A9）的那条路留着备用：
+                //    CalculateSeatCoordinate(examData.SeatMap.Map, examData.SeatNo)
+                var seatCell = tds[3];
+                var examData = FindSeatMatrixEntry(examList, seatCell.GetAttributeValue("id", ""));
 
-                // 从 JSON 列表中匹配出这场考试的详细座位图
-                var examData = examList.FirstOrDefault(e => e.Id == examId);
-
-                if (examData != null)
+                result.Add(new ExamInfo()
                 {
-                    // 计算行列坐标（例如 A9）
-                    // var alphabetCoordinate = CalculateSeatCoordinate(examData.SeatMap.Map, examData.SeatNo);
-
-                    result.Add(new ExamInfo()
-                    {
-                        Name = courseName.Split('\n')[0].Trim(),
-                        Location = examPlace,
-                        Time = time,
-                        Seat = examData.SeatNo.ToString()
-                    });
-                }
+                    Name = courseName.Split('\n')[0].Trim(),
+                    Location = examPlace,
+                    Time = time,
+                    Seat = examData != null ? examData.SeatNo.ToString() : seatCell.InnerText.Trim()
+                });
             }
         }
         catch (Exception ex)
@@ -349,6 +331,41 @@ public class ExamService(
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// 从页面内嵌的 <c>&lt;script&gt;</c> 中取出 <c>studentExamList</c> 座位矩阵。
+    /// 取不到时返回空表而不是让调用方放弃解析。
+    /// </summary>
+    private static List<StudentExam> ParseStudentExamList(string html)
+    {
+        const string pattern = @"var studentExamList = (\[.*?\]);";
+        var match = Regex.Match(html, pattern, RegexOptions.Singleline);
+
+        if (!match.Success)
+        {
+            Console.WriteLine("未在网页脚本中找到座位数据矩阵，座位号退回表格文本！");
+            return [];
+        }
+
+        // 将强智系统中的单引号替换为标准 JSON 的双引号
+        var jsonRaw = match.Groups[1].Value.Replace("'", "\"");
+        return JsonConvert.DeserializeObject<List<StudentExam>>(jsonRaw) ?? [];
+    }
+
+    /// <summary>
+    /// 按座位单元格的 id（形如 <c>seat-2666478</c>）在座位矩阵里找对应的一场考试。
+    /// </summary>
+    private static StudentExam? FindSeatMatrixEntry(List<StudentExam> examList, string seatCellId)
+    {
+        if (examList.Count == 0 || string.IsNullOrEmpty(seatCellId))
+        {
+            return null;
+        }
+
+        return long.TryParse(seatCellId.Replace("seat-", ""), out var examId)
+            ? examList.FirstOrDefault(e => e.Id == examId)
+            : null;
     }
 
     private static ExamRecord ExamInfoToRecord(string studentId, ExamInfo info)

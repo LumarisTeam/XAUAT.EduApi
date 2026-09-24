@@ -92,11 +92,22 @@ public class ElectricitySubscriptionServiceTests
     [Fact]
     public async Task QueryByEmailAsync_ShouldReturnSubscriptionIds_WhenSubscriptionsExist()
     {
+        // 仓储按 UpdatedAt 倒序返回（见 ElectricitySubscriptionRepository.GetSubscriptionsAsync），
+        // 服务取第一条即"最近更新的那条"。所以造数要给出时间先后，并按同样的顺序交给 mock，
+        // 否则期望值只是碰运气。
         _repositoryMock
             .Setup(x => x.GetSubscriptionsAsync("user@example.com", It.IsAny<CancellationToken>()))
             .ReturnsAsync([
-                new ElectricitySubscription { Id = "sub-1", Email = "user@example.com" },
-                new ElectricitySubscription { Id = "sub-2", Email = "user@example.com" }
+                new ElectricitySubscription
+                {
+                    Id = "sub-2", Email = "user@example.com",
+                    UpdatedAt = new DateTime(2026, 5, 2, 8, 0, 0, DateTimeKind.Utc)
+                },
+                new ElectricitySubscription
+                {
+                    Id = "sub-1", Email = "user@example.com",
+                    UpdatedAt = new DateTime(2026, 5, 1, 8, 0, 0, DateTimeKind.Utc)
+                }
             ]);
 
         var result = await _service.QueryByEmailAsync(" User@Example.com ");

@@ -107,6 +107,9 @@ public class ExamServiceTests
 
         _infoServiceMock.Setup(m => m.IsGreatThanStart()).Returns(true);
         _infoServiceMock.Setup(m => m.IsLessThanEnd()).Returns(true);
+        // 学期归属要拿 GetTime() 的开学日期去比对；不配这个 mock 会返回 null → NullReferenceException
+        _infoServiceMock.Setup(m => m.GetTime())
+            .Returns(new TimeModel { StartTime = "2025-09-01", EndTime = "2026-01-18" });
 
         var htmlContent = @"
             <html>

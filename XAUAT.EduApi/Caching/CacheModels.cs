@@ -48,10 +48,27 @@ public enum CacheStrategyType
 }
 
 /// <summary>
+/// 缓存项的只读视图。
+/// <para>
+/// <see cref="CacheItem{T}"/> 是不变（invariant）泛型，用
+/// <c>CacheItem&lt;object&gt;</c> 去取一个以 <c>CacheItem&lt;string&gt;</c> 存入的条目
+/// 时类型对不上，会被当成"不存在"。凡是<b>不关心值类型</b>的地方（如存在性检查）
+/// 一律通过这个接口访问。
+/// </para>
+/// </summary>
+public interface ICacheItem
+{
+    /// <summary>
+    /// 是否过期
+    /// </summary>
+    bool IsExpired { get; }
+}
+
+/// <summary>
 /// 缓存项
 /// </summary>
 /// <typeparam name="T">缓存值类型</typeparam>
-public class CacheItem<T>
+public class CacheItem<T> : ICacheItem
 {
     /// <summary>
     /// 缓存键

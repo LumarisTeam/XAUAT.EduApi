@@ -142,7 +142,9 @@ public class ElectricityService(
                     continue;
                 }
 
-                if (data.Count == 0 || data[^1].Timestamp.Hour != timestamp.Value.Hour)
+                // 按"整点"分桶：ParseTimestamp 已把时间戳对齐到小时，
+                // 所以整段时间戳相等就代表同一个小时（跨天也不会误并）。
+                if (data.Count == 0 || data[^1].Timestamp != timestamp.Value)
                 {
                     data.Add(new ElectricData()
                     {
@@ -162,11 +164,13 @@ public class ElectricityService(
 
     private static DateTime? ParseTimestamp(string rawValue)
     {
-        if (DateTime.TryParse(rawValue, out var timestamp))
+        if (!DateTime.TryParse(rawValue, out var timestamp))
         {
-            return timestamp;
+            return null;
         }
 
-        return null;
+        // 周用电是**按小时聚合**的：时间戳必须落到整点，否则同一小时的多条记录
+        // 会带着各自的分秒散落在曲线上（上游给的是 08:12 这种带分钟的原始时刻）。
+        return new DateTime(timestamp.Year, timestamp.Month, timestamp.Day, timestamp.Hour, 0, 0);
     }
 }

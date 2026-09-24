@@ -157,9 +157,12 @@ internal class LocalCacheManager
     /// <returns>是否存在</returns>
     public bool Exists(string key)
     {
-        if (_cache.TryGetValue(key, out CacheItem<object>? cacheItem))
+        // 这里不能用 CacheItem<object> 去取：存进来的是 CacheItem<T>，
+        // 泛型不变，CacheItem<string> 不是 CacheItem<object>，取不到就等于永远"不存在"。
+        // 只读视图 ICacheItem 与值类型无关，才是正确入口。
+        if (_cache.TryGetValue(key, out var rawValue) && rawValue is ICacheItem cacheItem)
         {
-            if (cacheItem is { IsExpired: false })
+            if (!cacheItem.IsExpired)
             {
                 return true;
             }
