@@ -169,6 +169,10 @@ public class CalendarService(
     /// <remarks>
     /// 不能把原始 <c>Campus</c> 直接透传给 <see cref="IClassTimeService"/>：它认不出校区时
     /// 默认回草堂，而客户端默认是雁塔，两边会算出不同的作息（草堂第 1 节 08:30、雁塔 08:00）。
+    /// <para>
+    /// <see cref="CourseActivity.Campus"/> / <see cref="CourseActivity.Room"/> 的非空由模型
+    /// 自己的设置器兜底（上游会下发显式 null），所以这里直接判空即可——别再假设靠属性初始值。
+    /// </para>
     /// </remarks>
     private static string ResolveCampus(CourseActivity course)
     {

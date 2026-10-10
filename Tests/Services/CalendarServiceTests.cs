@@ -163,6 +163,43 @@ public class CalendarServiceTests
     }
 
     [Fact]
+    public async Task GenerateAsync_ShouldSurviveExplicitNullsFromUpstream()
+    {
+        // 线上 500 的复现：上游会把 campus/room/teachers 下发成显式 null，
+        // 而 CourseActivity 的属性初始值只挡得住"字段缺失"。校区判定必须退化到
+        // 客户端默认值（雁塔：第 1 节 08:00），而不是抛 NullReferenceException。
+        SetLogin();
+        SetSemesterStart(new DateTime(2026, 3, 1));
+        SetCourses(Newtonsoft.Json.JsonConvert.DeserializeObject<CourseResponse>("""
+            {
+              "studentTableVm": {
+                "activities": [
+                  {
+                    "lessonId": "lesson-null-campus",
+                    "courseName": "上游脏数据",
+                    "campus": null,
+                    "room": null,
+                    "teachers": null,
+                    "weekIndexes": [1],
+                    "weekday": 1,
+                    "startUnit": 1,
+                    "endUnit": 2
+                  }
+                ]
+              }
+            }
+            """)!.StudentTableVm.Activities.ToArray());
+        SetExams();
+
+        var ics = await GenerateAsync(CreateService());
+
+        Assert.Contains("UID:course-lesson-null-campus-2026-03-02T08:00:00", ics, StringComparison.Ordinal);
+        Assert.Contains("DTSTART;TZID=Asia/Shanghai:20260302T080000", ics, StringComparison.Ordinal);
+        Assert.Contains("DESCRIPTION:\r\n", ics, StringComparison.Ordinal);
+        Assert.Contains("LOCATION:\r\n", ics, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task GenerateAsync_ShouldSkipCourseEvent_WhenUnitHasNoTime()
     {
         // 雁塔第 5 节在作息表里是空串（本来就没课）
