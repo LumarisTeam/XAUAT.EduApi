@@ -48,6 +48,10 @@ jobs:
     needs: test
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    # job 默认超时是 360 分钟：卡住时不会失败，只会静默占着 runner；又因为下面的
+    # concurrency group 是 cancel-in-progress: false，后续每次 push 都会排在这个
+    # 卡死的 run 后面。90 分钟 = 冷缓存构建 + 两段推送，留了余量。
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - name: Resolve image name and tags
@@ -58,17 +62,20 @@ jobs:
           image="${REGISTRY}/${repository}"
           name="${repository##*/}"
 
-          # tag 列表：ghcr 永远推；配了国内镜像仓库时，再把同一批 tag 推一份过去，
+          # tag 分两组输出，因为下面两条 push 是分开的两步（原因见那两步的注释）：
+          # ghcr 永远推；配了国内镜像仓库时，同一批 tag 再推一份过去，
           # 好让国内服务器从那边拉，绕开 ghcr 的跨国链路。
           {
-            echo "tags<<TAGS_EOF"
+            echo "ghcr_tags<<TAGS_EOF"
             echo "${image}:${GITHUB_SHA}"
             echo "${image}:latest"
+            echo "TAGS_EOF"
             if [[ -n "$MIRROR_REGISTRY" && -n "$MIRROR_NAMESPACE" ]]; then
+              echo "mirror_tags<<TAGS_EOF"
               echo "${MIRROR_REGISTRY}/${MIRROR_NAMESPACE}/${name}:${GITHUB_SHA}"
               echo "${MIRROR_REGISTRY}/${MIRROR_NAMESPACE}/${name}:latest"
+              echo "TAGS_EOF"
             fi
-            echo "TAGS_EOF"
           } >> "$GITHUB_OUTPUT"
 
           echo "image=${image}" >> "$GITHUB_OUTPUT"
@@ -87,11 +94,37 @@ jobs:
           registry: ${{ env.MIRROR_REGISTRY }}
           username: ${{ secrets.MIRROR_USERNAME }}
           password: ${{ secrets.MIRROR_PASSWORD }}
-      - name: Build and push
+      # 构建+推送拆成两步，而不是一个 tags 列表一次推两个仓库：buildx 的一个 export
+      # 顶点会并发推所有目标仓库，但只要其中一个没返回，整步就停在日志末行
+      # "exporting to image" 上不动 —— 既看不出是哪个仓库慢，也没法单独重试。
+      # 拆开后 ghcr 先落地（快），国内镜像单独一步、单独超时。
+      - name: Build and push to GitHub Container Registry
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          tags: ${{ steps.image.outputs.tags }}
+          tags: ${{ steps.image.outputs.ghcr_tags }}
+          # 关掉 buildx 默认生成的 provenance 证明：那是额外的 manifest + blob，两个
+          # 仓库各要推一份，而它走的正是 buildkit 那套 cache/descriptor 导出路径
+          # （moby/buildkit#6131 卡死的路径）。本服务不消费证明，直接关掉。
+          provenance: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+        # 冷缓存首次构建约 10 分钟。这里只是防它像 job 默认的 360 分钟那样挂着不动。
+        timeout-minutes: 25
+
+      # 第二遍构建的每个 RUN/COPY 都会命中上一步留在同一个 builder 容器里的本地缓存，
+      # 秒级完成；这一步真正的时间全花在把层推到 ccr.ccs.tencentyun.com 这段从 Azure
+      # 到国内的链路上（首次全量推送实测约 40 分钟）。40 分钟是"卡住就别再等"的上限，
+      # 基底层已经在 TCR 里时每次只推改动的应用层，远用不到。
+      - name: Push to mirror registry
+        if: env.MIRROR_REGISTRY != '' && env.MIRROR_NAMESPACE != ''
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.image.outputs.mirror_tags }}
+          provenance: false
+          # 本地缓存没命中时的兜底；正常情况用不上。
+          cache-from: type=gha
+        timeout-minutes: 40
