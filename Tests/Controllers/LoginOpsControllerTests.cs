@@ -6,7 +6,6 @@ using Microsoft.Extensions.Options;
 using Moq;
 using XAUAT.EduApi.Configuration;
 using XAUAT.EduApi.Controllers.V1;
-using XAUAT.EduApi.Exceptions;
 using XAUAT.EduApi.Interfaces;
 using XAUAT.EduApi.Localization;
 using XAUAT.EduApi.Services;
@@ -200,45 +199,13 @@ public class LoginOpsControllerTests
     // ---------------------------------------------------------------- 异常映射
 
     [Fact]
-    public async Task GetBanLogs_ShouldReturn503_WhenLoginApiNotConfigured()
-    {
-        var loginAdminService = new Mock<ILoginAdminService>();
-        loginAdminService.Setup(x => x.GetBanLogsAsync(It.IsAny<string?>(), It.IsAny<string?>()))
-            .ThrowsAsync(new LoginOpsNotConfiguredException("未配置 LOGIN_API_BASE_URL"));
-        var controller = CreateController(loginAdminService.Object, token: Token);
-
-        var result = await controller.GetBanLogs();
-
-        var objectResult = Assert.IsType<ObjectResult>(result.Result);
-        Assert.Equal(StatusCodes.Status503ServiceUnavailable, objectResult.StatusCode);
-        var payload = Assert.IsType<ApiResponse<object>>(objectResult.Value);
-        Assert.Equal(ApiCodes.UpstreamError, payload.Code);
-        Assert.Equal(MessageLocalizer.Get("zh", ApiMessageKey.LoginOpsBaseUrlNotConfigured), payload.Message);
-    }
-
-    [Fact]
-    public async Task GetUserCount_ShouldReturn503_WhenLoginServiceUnreachable()
-    {
-        var loginAdminService = new Mock<ILoginAdminService>();
-        loginAdminService.Setup(x => x.GetUserCountAsync())
-            .ThrowsAsync(new LoginOpsUnavailableException("连不上"));
-        var controller = CreateController(loginAdminService.Object, token: Token);
-
-        var result = await controller.GetUserCount();
-
-        var objectResult = Assert.IsType<ObjectResult>(result.Result);
-        Assert.Equal(StatusCodes.Status503ServiceUnavailable, objectResult.StatusCode);
-        var payload = Assert.IsType<ApiResponse<object>>(objectResult.Value);
-        Assert.Equal(MessageLocalizer.Get("zh", ApiMessageKey.ServiceUnavailable), payload.Message);
-    }
-
-    [Fact]
     public async Task GetUserCount_ShouldReturn500_WhenUnexpectedError()
     {
-        // 非领域异常（上游 5xx 等）必须回 500 —— 与 503 区分开，否则真 bug 会被当成"稍后重试"
+        // 数据源是本地 Redis，因此已经不存在"上游连不上/没配地址"那两条 503 分支了。
+        // 剩下的唯一失败形态就是 bug，必须回 500——不能让它伪装成"稍后重试"。
         var loginAdminService = new Mock<ILoginAdminService>();
         loginAdminService.Setup(x => x.GetUserCountAsync())
-            .ThrowsAsync(new InvalidOperationException("LoginApi 返回 500"));
+            .ThrowsAsync(new InvalidOperationException("Redis 结构异常"));
         var controller = CreateController(loginAdminService.Object, token: Token);
 
         var result = await controller.GetUserCount();
@@ -248,6 +215,72 @@ public class LoginOpsControllerTests
         var payload = Assert.IsType<ApiResponse<object>>(objectResult.Value);
         Assert.Equal(ApiCodes.InternalError, payload.Code);
         Assert.Equal(MessageLocalizer.Get("zh", ApiMessageKey.InternalServerError), payload.Message);
+    }
+
+    // ---------------------------------------------------------------- 封禁状态
+
+    [Fact]
+    public async Task GetBanStatus_ShouldReturnUnauthorized_WhenNoToken()
+    {
+        var loginAdminService = new Mock<ILoginAdminService>();
+        var controller = CreateController(loginAdminService.Object);
+
+        var result = await controller.GetBanStatus(username: "2024001");
+
+        Assert.IsType<UnauthorizedObjectResult>(result.Result);
+        loginAdminService.Verify(
+            x => x.GetBanStatusAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GetBanStatus_ShouldReturnBadRequest_WhenUsernameMissing()
+    {
+        var controller = CreateController(Mock.Of<ILoginAdminService>(), token: Token);
+
+        var result = await controller.GetBanStatus();
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        var payload = Assert.IsType<ApiResponse<object>>(badRequest.Value);
+        Assert.Equal(ApiCodes.ParamError, payload.Code);
+        Assert.Equal(MessageLocalizer.Get("zh", ApiMessageKey.LoginOpsUsernameRequired), payload.Message);
+    }
+
+    [Fact]
+    public async Task GetBanStatus_ShouldDefaultSchoolToXauat_AndLowercase()
+    {
+        // 封禁键是 security:ban:{school}:{username}，前缀匹配大小写敏感，
+        // 因此学校必须在进服务层之前就规整好——否则 ?school=XAUAT 会静默查不到。
+        var loginAdminService = new Mock<ILoginAdminService>();
+        loginAdminService
+            .Setup(x => x.GetBanStatusAsync("xauat", "2024001"))
+            .ReturnsAsync(new BanStatusResult { Banned = true, Items = [new BanItem { Account = "xauat:2024001" }] });
+
+        var controller = CreateController(loginAdminService.Object, token: Token);
+
+        var result = await controller.GetBanStatus(school: "XAUAT", username: "2024001");
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var payload = Assert.IsType<ApiResponse<BanStatusResult>>(ok.Value);
+        Assert.True(payload.Data!.Banned);
+        Assert.Single(payload.Data.Items);
+    }
+
+    [Fact]
+    public async Task GetBanStatus_ShouldDefaultSchoolToXauat_WhenMissing()
+    {
+        var loginAdminService = new Mock<ILoginAdminService>();
+        loginAdminService
+            .Setup(x => x.GetBanStatusAsync("xauat", "2024001"))
+            .ReturnsAsync(new BanStatusResult { Banned = false });
+
+        var controller = CreateController(loginAdminService.Object, token: Token);
+
+        var result = await controller.GetBanStatus(username: "2024001");
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var payload = Assert.IsType<ApiResponse<BanStatusResult>>(ok.Value);
+        Assert.False(payload.Data!.Banned);
+        Assert.Empty(payload.Data.Items);
     }
 
     // ---------------------------------------------------------------- 夹具

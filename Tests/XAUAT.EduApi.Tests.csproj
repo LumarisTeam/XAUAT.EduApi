@@ -33,4 +33,14 @@
     <ProjectReference Include="../EduApi.Data/EduApi.Data.csproj" />
   </ItemGroup>
 
+  <!--
+    上游抓取样本（CAS 登录页）。**必须是 Include，不能写 Update**：
+    这是普通 SDK 项目，默认 glob 只有 **/*.cs，.html 不在其中，用 Update 会静默不拷贝，
+    测试跑到 File.ReadAllText 时才报 FileNotFound。
+    （app 项目那边能用 Update，是因为 Web SDK 自带 **/*.json glob；两处别抄错。）
+  -->
+  <ItemGroup>
+    <Content Include="TestFixtures/**/*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

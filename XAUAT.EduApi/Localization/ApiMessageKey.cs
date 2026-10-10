@@ -19,5 +19,4 @@ public static class ApiMessageKey
     public const string PaymentTurnoverUnknownError = nameof(PaymentTurnoverUnknownError);
     public const string LoginOpsTokenRequired = nameof(LoginOpsTokenRequired);
     public const string LoginOpsUsernameRequired = nameof(LoginOpsUsernameRequired);
-    public const string LoginOpsBaseUrlNotConfigured = nameof(LoginOpsBaseUrlNotConfigured);
 }

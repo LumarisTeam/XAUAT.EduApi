@@ -176,16 +176,22 @@ API控制器层是系统对外的接口，负责处理HTTP请求，调用相应�
 ### 3.1 用户登录流程
 
 ```
-客户端 → API网关 → LoginController → ILoginService → 教务处系统 → ILoginService → LoginController → API网关 → 客户端
+客户端 → API网关 → LoginController → ILoginService(SsoLoginService) → SsoAuthService
+                                                                          ├─ Redis（缓存命中？）
+                                                                          └─ CAS authserver → swjw 教务系统
+                                        → ICookieCodeService（拿教务 cookie 反解学号）
 ```
 
 1. 客户端发送登录请求到API网关。
 2. API网关将请求路由到LoginController。
 3. LoginController调用ILoginService的LoginAsync方法。
-4. ILoginService与教务处系统进行交互，获取认证Cookie。
-5. ILoginService将登录结果返回给LoginController。
-6. LoginController将登录结果返回给API网关。
-7. API网关将登录结果返回给客户端。
+4. SsoLoginService先看是否命中测试账号；否则交给 SsoAuthService 按三级优先级登录：
+   **缓存的 eduCookie → 缓存的 SSO 票据换票 → 完整 CAS 登录**（这一步要跨
+   `authserver` 与 `swjw` 两跳，且必须手工逐跳跟随重定向才能拿到教务会话）。
+5. 拿到教务 cookie 后，再经 ICookieCodeService 去教务系统反解学号。
+6. LoginController将登录结果返回给API网关，再返回给客户端。
+
+失败语义：账号被封 → 429 + `Retry-After`；用户名密码错 / 命中限流 / 拿不到 cookie → 401。
 
 ### 3.2 数据请求流程
 

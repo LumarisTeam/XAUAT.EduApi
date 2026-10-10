@@ -2,7 +2,7 @@ namespace XAUAT.EduApi.Exceptions;
 
 /// <summary>
 /// 账号封禁异常类
-/// 当登录服务（XAUAT.LoginApi）判定该账号已被封禁时抛出。
+/// 当本服务判定该账号已被封禁时抛出（见 <c>Login/SsoAuthService</c> 的两级限流策略）。
 /// </summary>
 /// <remarks>
 /// 与 <see cref="RateLimitException"/> 刻意区分开：那个表达的是"教务系统对请求限流"
@@ -13,12 +13,12 @@ public class AccountBannedException(string message, string? reason = null, long?
     : Exception(message)
 {
     /// <summary>
-    /// 封禁理由（LoginApi 的 <c>ban_reason</c>，如"连续触发登录限流"）。
+    /// 封禁理由（如"连续触发登录限流"）。
     /// </summary>
     public string? Reason { get; } = reason;
 
     /// <summary>
-    /// 解封时刻（LoginApi 的 <c>ban_until</c>，unix 秒）。
+    /// 解封时刻（unix 秒）。
     /// </summary>
     public long? UnbanAt { get; } = unbanAt;
 

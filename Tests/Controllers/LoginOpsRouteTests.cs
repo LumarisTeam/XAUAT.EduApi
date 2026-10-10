@@ -46,6 +46,7 @@ public class LoginOpsRouteTests
     [Theory]
     [InlineData("v1/login-ops/user-count", "GET")]
     [InlineData("v1/login-ops/ban-logs", "GET")]
+    [InlineData("v1/login-ops/ban-status", "GET")]
     [InlineData("v1/login-ops/unban", "POST")]
     public void LoginOpsRoutes_ShouldBeMapped(string pattern, string method)
     {

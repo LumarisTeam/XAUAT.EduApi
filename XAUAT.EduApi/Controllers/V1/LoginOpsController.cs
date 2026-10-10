@@ -1,7 +1,6 @@
 using EduApi.Data.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
-using XAUAT.EduApi.Exceptions;
 using XAUAT.EduApi.Interfaces;
 using XAUAT.EduApi.Localization;
 using XAUAT.EduApi.Services;
@@ -9,11 +8,12 @@ using XAUAT.EduApi.Services;
 namespace XAUAT.EduApi.Controllers.V1;
 
 /// <summary>
-/// 登录服务的运维/统计端点：活跃用户数、封禁日志、解封。
+/// 登录服务的运维/统计端点：活跃用户数、封禁日志、封禁状态、解封。
 /// <para>
-/// 数据全部来自独立的 XAUAT.LoginApi（经 <see cref="ILoginAdminService"/> 转发）——
-/// 管理端 lumaris_admin 部署在别的主机上，够不到只在 <c>xauat-net</c> 内暴露的登录服务，
-/// 本控制器就是那层出口。
+/// 数据来自本进程直接读的 Redis——这些数据原先在独立的 XAUAT.LoginApi 里，
+/// 由 <c>HttpLoginAdminService</c> 转发；登录逻辑搬进 EduApi 之后，
+/// 那个"管理端够不到内网登录服务"的理由随之消失，代理也就撤了。
+/// 键名与值编码仍是与 Flask 共用的那套（见 <c>Login.LoginCacheKeys</c>）。
 /// </para>
 /// <para>
 /// <b>全部端点都要管理员 Token</b>（<see cref="IMapAdminTokenService"/>，环境变量
@@ -46,7 +46,6 @@ public class LoginOpsController(
     [ProducesResponseType(typeof(ApiResponse<LoginUserCount>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status500InternalServerError)]
-    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status503ServiceUnavailable)]
     public async Task<ActionResult<ApiResponse<LoginUserCount>>> GetUserCount()
     {
         var unauthorized = EnsureAuthorized();
@@ -62,21 +61,20 @@ public class LoginOpsController(
         }
         catch (Exception ex)
         {
-            return MapException(ex, "获取活跃用户数");
+            return ServerError(ex, "获取活跃用户数");
         }
     }
 
     /// <summary>
-    /// 封禁日志（最新在前）。上游固定只返回最近 200 条，因此不分页。
+    /// 封禁日志（最新在前）。固定只返回最近 200 条，因此不分页。
     /// </summary>
-    /// <param name="school">按学校过滤（前缀匹配，上游会转小写）。留空表示不过滤。</param>
+    /// <param name="school">按学校过滤（前缀匹配，服务层会转小写）。留空表示不过滤。</param>
     /// <param name="username">按用户名过滤。历史条目是 <c>学校:用户名:密码哈希</c> 三段式，
-    /// 上游对两种形状都做了兼容。</param>
+    /// 服务层对两种形状都做了兼容。</param>
     [HttpGet("ban-logs")]
     [ProducesResponseType(typeof(ApiResponse<BanLogPage>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status500InternalServerError)]
-    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status503ServiceUnavailable)]
     public async Task<ActionResult<ApiResponse<BanLogPage>>> GetBanLogs(
         [FromQuery] string? school = null,
         [FromQuery] string? username = null)
@@ -94,7 +92,49 @@ public class LoginOpsController(
         }
         catch (Exception ex)
         {
-            return MapException(ex, "获取封禁日志");
+            return ServerError(ex, "获取封禁日志");
+        }
+    }
+
+    /// <summary>
+    /// 查询某账号当前是否处于封禁中，以及封禁记录的明细。
+    /// <para>
+    /// 这是迁移时**唯一新增**的端点：它接管的是 LoginApi 那条没搬过来的
+    /// <c>GET /security/ban_status</c>。封禁日志回答"发生过什么"，本端点回答"现在是否仍然生效"。
+    /// </para>
+    /// <para>
+    /// 学校缺省 <c>xauat</c> 并一律转小写（封禁键就是这么拼的）；用户名必填。
+    /// </para>
+    /// </summary>
+    [HttpGet("ban-status")]
+    [ProducesResponseType(typeof(ApiResponse<BanStatusResult>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult<ApiResponse<BanStatusResult>>> GetBanStatus(
+        [FromQuery] string? school = null,
+        [FromQuery] string? username = null)
+    {
+        var unauthorized = EnsureAuthorized();
+        if (unauthorized is not null)
+        {
+            return unauthorized;
+        }
+
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            return BadRequest(ErrorResponse(ApiCodes.ParamError, Message(ApiMessageKey.LoginOpsUsernameRequired)));
+        }
+
+        try
+        {
+            var schoolKey = string.IsNullOrWhiteSpace(school) ? "xauat" : school.ToLowerInvariant();
+            var result = await loginAdminService.GetBanStatusAsync(schoolKey, username);
+            return Ok(SuccessResponse(result));
+        }
+        catch (Exception ex)
+        {
+            return ServerError(ex, "查询封禁状态");
         }
     }
 
@@ -105,7 +145,7 @@ public class LoginOpsController(
     /// （<c>{school}:{username}</c> 或 <c>{school}:{username}:{hash}</c>，两种都取前两段）。
     /// </para>
     /// <para>
-    /// 「用户当前未被封禁」回 <b>400</b> 并带上游文案，而不是 500——那是业务结果。
+    /// 「用户当前未被封禁」回 <b>400</b> 并带上文案，而不是 500——那是业务结果。
     /// </para>
     /// </summary>
     [HttpPost("unban")]
@@ -113,7 +153,6 @@ public class LoginOpsController(
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status500InternalServerError)]
-    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status503ServiceUnavailable)]
     public async Task<ActionResult<ApiResponse<UnbanResult>>> Unban([FromBody] UnbanRequest request)
     {
         var unauthorized = EnsureAuthorized();
@@ -127,7 +166,7 @@ public class LoginOpsController(
             return BadRequest(ErrorResponse(ApiCodes.ParamError, Message(ApiMessageKey.LoginOpsUsernameRequired)));
         }
 
-        // 与上游一致：学校缺省 xauat，且一律转小写（封禁键就是这么拼的）
+        // 与封禁键的拼法一致：学校缺省 xauat，且一律转小写
         var school = string.IsNullOrWhiteSpace(request.School) ? "xauat" : request.School.ToLowerInvariant();
 
         try
@@ -136,7 +175,7 @@ public class LoginOpsController(
 
             if (!result.Success)
             {
-                // 上游的 400 文案（如"用户当前未被封禁或解封失败"）原样透出，比本地化文案更有信息量
+                // 「用户当前未被封禁或解封失败」原样透出，比本地化文案更有信息量
                 return BadRequest(ErrorResponse(ApiCodes.ParamError, result.Message));
             }
 
@@ -147,7 +186,7 @@ public class LoginOpsController(
         }
         catch (Exception ex)
         {
-            return MapException(ex, "解封账号");
+            return ServerError(ex, "解封账号");
         }
     }
 
@@ -172,28 +211,18 @@ public class LoginOpsController(
     }
 
     /// <summary>
-    /// 把服务层异常翻译成响应。三个端点共用，避免三份逐字相同的 catch 链。
+    /// 把服务层异常翻译成响应。
+    /// <para>
+    /// 只剩一个分支：数据源是本地 Redis，没有"上游不可达"或"没配地址"这两种情况了
+    /// （<c>LoginRedisStore</c> 在 Redis 挂掉时降级为空操作，不抛异常），
+    /// 因此原先的 503 两分支连同那两个异常类型一并删除。
+    /// </para>
     /// </summary>
-    private ObjectResult MapException(Exception exception, string operation)
+    private ObjectResult ServerError(Exception exception, string operation)
     {
-        switch (exception)
-        {
-            case LoginOpsNotConfiguredException:
-                // 只说"没配地址"，日志里才有完整原因；这条在部署时就会被发现
-                logger.LogError(exception, "登录运维数据不可用：{Message}", exception.Message);
-                return StatusCode(StatusCodes.Status503ServiceUnavailable,
-                    ErrorResponse(ApiCodes.UpstreamError, Message(ApiMessageKey.LoginOpsBaseUrlNotConfigured)));
-
-            case LoginOpsUnavailableException:
-                logger.LogError(exception, "连接登录服务失败（{Operation}）", operation);
-                return StatusCode(StatusCodes.Status503ServiceUnavailable,
-                    ErrorResponse(ApiCodes.UpstreamError, Message(ApiMessageKey.ServiceUnavailable)));
-
-            default:
-                logger.LogError(exception, "{Operation}失败", operation);
-                return StatusCode(StatusCodes.Status500InternalServerError,
-                    ErrorResponse(ApiCodes.InternalError, Message(ApiMessageKey.InternalServerError)));
-        }
+        logger.LogError(exception, "{Operation}失败", operation);
+        return StatusCode(StatusCodes.Status500InternalServerError,
+            ErrorResponse(ApiCodes.InternalError, Message(ApiMessageKey.InternalServerError)));
     }
 }
 

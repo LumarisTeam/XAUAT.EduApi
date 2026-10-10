@@ -41,7 +41,7 @@ public class CalendarService(
     {
         logger.LogInformation("开始生成日历，学号: {Username}", username);
 
-        // 登录。测试账号在 HttpLoginService 内部就已短路（返回伪造 cookie 与固定学号），
+        // 登录。测试账号在 SsoLoginService 内部就已短路（返回伪造 cookie 与固定学号），
         // 后续的 CourseService/ExamService 也会各自识别测试账号并改走 fixtures，
         // 所以这里不需要为测试账号写任何分支。
         var login = await loginService.LoginAsync(username, password);

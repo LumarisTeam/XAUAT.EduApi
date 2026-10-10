@@ -95,7 +95,6 @@ if [[ ! -f .env ]]; then
 请在当前目录创建 .env，至少包含：
   ASPNETCORE_ENVIRONMENT=Production
   PAYMENT_API_BASE_URL=http://xauat-paymentapi:8080   # 必需，缺失时启动即失败
-  LOGIN_API_BASE_URL=                                 # 留空 = 直接打 Flask；填了 = 转发到 XAUAT.LoginApi
   SQL=                                                # 留空 = SQLite；生产建议填 PostgreSQL
   REDIS=                                              # 留空 = 不启用 Redis
 
@@ -149,8 +148,8 @@ fi
 
 # ------------------------------------------------------------------ 共享网络
 
-# EduApi 是调用方：它靠 xauat-paymentapi / xauat-loginapi 这两个名字解析到另外两个服务，
-# 三方必须在同一张网络上。
+# EduApi 靠 xauat-paymentapi 这个名字解析到支付服务（登录已在 EduApi 内实现，
+# 不再依赖 xauat-loginapi），两者必须在同一张网络上。
 if ! docker network inspect "$NETWORK_NAME" >/dev/null 2>&1; then
   echo "==> 创建共享网络 $NETWORK_NAME"
   docker network create "$NETWORK_NAME" >/dev/null

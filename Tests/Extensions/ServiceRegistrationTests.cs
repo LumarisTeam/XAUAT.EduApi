@@ -3,88 +3,119 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Moq;
+using StackExchange.Redis;
+using System.Net;
+using System.Reflection;
 using XAUAT.EduApi.Controllers.V1;
 using XAUAT.EduApi.Extensions;
 using XAUAT.EduApi.Interfaces;
 using XAUAT.EduApi.Logging;
+using XAUAT.EduApi.Login;
+using XAUAT.EduApi.Login.Xauat;
 using XAUAT.EduApi.Services;
 
 namespace XAUAT.EduApi.Tests.Extensions;
 
 /// <summary>
-/// <see cref="ServiceCollectionExtensions.AddBusinessServices"/> 里登录那段的注册测试。
+/// <see cref="ServiceCollectionExtensions.AddLoginServices"/> 与
+/// <see cref="ServiceCollectionExtensions.AddBusinessServices"/> 的注册测试。
 /// <para>
-/// 单元测试都是直接 <c>new HttpLoginService(...)</c> 的，绕开了 DI，因此证明不了
-/// 容器能真的把它构造出来——而它的构造签名里有两个可选参数
-/// （<c>ITestAccountResolver?</c> 与 <c>TimeSpan[]?</c>，生产环境都不注册），
-/// 一旦 <c>ActivatorUtilities</c> 不认默认值，故障发生在启动时而不是测试里。
-/// 这个测试就是守这条路径的。
+/// 单元测试都是直接 <c>new SsoAuthService(...)</c> 的，绕开了 DI，因此证明不了容器能真的
+/// 把它构造出来——而这些服务全都依赖真实的 <c>IHttpClientFactory</c> / Redis，
+/// 漏注册只会在**请求时**才 500。这个测试就是守这条路径的。
 /// </para>
 /// </summary>
 public class ServiceRegistrationTests
 {
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    public void ResolvedLoginApiBaseUrl_ShouldFallBackToFlask_WhenNotConfigured(string? configured)
-    {
-        var configuration = new ServiceConfiguration { LoginApiBaseUrl = configured };
-
-        Assert.Equal(ServiceConfiguration.FlaskLoginBaseUrl, configuration.ResolvedLoginApiBaseUrl);
-        Assert.Equal("https://schedule.xauat.site", configuration.ResolvedLoginApiBaseUrl);
-    }
-
     [Fact]
-    public void ResolvedLoginApiBaseUrl_ShouldPreferConfiguredValue()
+    public void LoginService_ShouldBeResolvable()
     {
-        var configuration = new ServiceConfiguration { LoginApiBaseUrl = "http://xauat-loginapi:8080" };
-
-        Assert.Equal("http://xauat-loginapi:8080", configuration.ResolvedLoginApiBaseUrl);
-    }
-
-    [Fact]
-    public void LoginService_ShouldBeResolvable_WhenLoginApiNotConfigured()
-    {
-        // ITestAccountResolver 与 retryDelays 在生产注册里都不存在，
-        // 必须靠默认值兜住——这正是这条用例要钉死的行为。
-        using var provider = BuildProvider(loginApiBaseUrl: null);
+        using var provider = BuildProvider();
 
         var loginService = provider.GetRequiredService<ILoginService>();
 
-        Assert.IsType<HttpLoginService>(loginService);
+        Assert.IsType<SsoLoginService>(loginService);
     }
 
     [Fact]
-    public void LoginService_ShouldBeResolvable_WhenLoginApiConfigured()
+    public void LoginService_ShouldBeScoped_NotSingleton()
     {
-        using var provider = BuildProvider("http://xauat-loginapi:8080");
+        // SsoLoginService 依赖 Scoped 的 ICookieCodeService。注册成单例就是 captive dependency：
+        // Development 下每次请求抛异常，Production 下静默把它捕获到进程结束——
+        // 后者意味着 CookieCodeService 的 HttpClient 再也不会轮换。
+        var services = BuildServices();
 
-        Assert.IsType<HttpLoginService>(provider.GetRequiredService<ILoginService>());
+        Assert.Equal(ServiceLifetime.Scoped, DescribeLifetime<ILoginService>(services));
+        Assert.Equal(ServiceLifetime.Scoped, DescribeLifetime<ILoginAdminService>(services));
     }
 
     [Fact]
-    public void LoginClient_ShouldTargetConfiguredLoginApi()
+    public void LoginRedisStore_ShouldNotDependOnEduApiCacheService()
     {
-        using var provider = BuildProvider("http://xauat-loginapi:8080");
-        var factory = provider.GetRequiredService<IHttpClientFactory>();
+        // 登录那套 Redis 键**刻意不带任何前缀**（与 Flask 共用），而 EduApi 的 ICacheService
+        // 会给键加 "EduApi:" 前缀、并把值包成 CacheItem<T> JSON 信封。
+        // 一旦有人"顺手统一"成 ICacheService，不会有任何报错——只表现为缓存始终不命中、
+        // 活跃用户数恒为 0、封禁状态读不出来。这条就是拦那次重构的。
+        var parameters = typeof(LoginRedisStore).GetConstructors()
+            .SelectMany(constructor => constructor.GetParameters())
+            .Select(parameter => parameter.ParameterType)
+            .ToList();
 
-        var client = factory.CreateClient(nameof(ILoginService));
-
-        Assert.Equal(new Uri("http://xauat-loginapi:8080"), client.BaseAddress);
-        Assert.Equal(HttpTimeouts.Slow, client.Timeout);
+        Assert.DoesNotContain(typeof(Caching.ICacheService), parameters);
+        Assert.Contains(typeof(IEnumerable<IConnectionMultiplexer>), parameters);
     }
 
     [Fact]
-    public void LoginClient_ShouldTargetFlask_WhenLoginApiNotConfigured()
+    public void LoginRedisStore_ShouldReportUnavailable_WhenNoMultiplexerRegistered()
     {
-        using var provider = BuildProvider(loginApiBaseUrl: null);
-        var factory = provider.GetRequiredService<IHttpClientFactory>();
+        // 没配 REDIS 时容器注入空集合，而不是抛异常——这是"降级为无缓存、无限流登录"的入口。
+        using var provider = BuildProvider();
 
-        var client = factory.CreateClient(nameof(ILoginService));
-
-        Assert.Equal(new Uri("https://schedule.xauat.site"), client.BaseAddress);
+        Assert.False(provider.GetRequiredService<ILoginRedisStore>().IsAvailable);
     }
 
+    [Fact]
+    public void LoginRedisStore_ShouldPickUpRegisteredMultiplexer()
+    {
+        // 反向：注册了多路复用器就必须真的用上。
+        // 若将来 AddRedisServices 改了注册方式而这里读不到，故障是静默的（登录仍能work，
+        // 只是永远不缓存、限流封禁全部失效）。
+        var database = new Mock<IDatabase>();
+        var multiplexer = new Mock<IConnectionMultiplexer>();
+        multiplexer.Setup(mux => mux.GetDatabase(It.IsAny<int>(), It.IsAny<object>())).Returns(database.Object);
+
+        using var provider = BuildProvider(multiplexer.Object);
+
+        Assert.True(provider.GetRequiredService<ILoginRedisStore>().IsAvailable);
+    }
+
+    /// <summary>
+    /// 认证服务器客户端的两项开关。
+    /// <para>
+    /// 这是整条登录链路里**最容易配错、失败信息最不像配置错误**的一处：
+    /// 自动重定向一旦打开，<see cref="XauatSsoClient"/> 手工逐跳捕获 Set-Cookie 的逻辑
+    /// 就拿不到中间响应，教务会话（种在跳转链第 2 跳）取不到，
+    /// 表现为「所有用户登录都报『未能获取有效会话』」——看起来像上游挂了。
+    /// 自动 cookie 管理打开则会让并发登录共用一个 CookieContainer 而串号。
+    /// </para>
+    /// <para>
+    /// 断言方式：把生成好的 handler 链一路剥到最内层的 <see cref="SocketsHttpHandler"/> 再读属性。
+    /// 依赖 <c>DelegatingHandler._innerHandler</c> 这个私有字段名；名字若变，这里会直接失败
+    /// （而不是静默放过），正是想要的失败模式。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void XauatAuthClient_ShouldDisableAutoRedirectAndCookieHandling()
+    {
+        using var provider = BuildFullProvider();
+        var handlerFactory = provider.GetRequiredService<IHttpMessageHandlerFactory>();
+
+        using var handler = handlerFactory.CreateHandler(XauatSsoClient.ClientName);
+        var sockets = Assert.IsType<SocketsHttpHandler>(Unwrap(handler));
+
+        Assert.False(sockets.AllowAutoRedirect, "认证客户端必须关掉自动重定向（换票靠逐跳捕获 Set-Cookie）");
+        Assert.False(sockets.UseCookies, "认证客户端必须关掉自动 cookie（并发登录会串号）");
+    }
 
     [Fact]
     public void CalendarService_ShouldBeResolvable()
@@ -99,35 +130,16 @@ public class ServiceRegistrationTests
     [Fact]
     public void LoginAdminService_ShouldBeResolvable()
     {
-        // 与登录同理：HttpLoginAdminService 的构造签名里有一个可选参数
-        // （TimeSpan[]? retryDelays，生产注册里不存在），ActivatorUtilities 认不认默认值
-        // 只会在**请求时**暴露。它还要 ILoginAdminService 真的被注册过。
         using var provider = BuildFullProvider();
 
-        Assert.IsType<HttpLoginAdminService>(provider.GetRequiredService<ILoginAdminService>());
-    }
-
-    [Fact]
-    public void LoginAdminClient_ShouldTargetFallbackLoginApi()
-    {
-        // BuildFullProvider 不设 LoginApiBaseUrl，因此应回落到 Flask。
-        // 注意封禁日志在回落模式下会由服务层拦住并回 503（见 LoginOpsNotConfiguredException），
-        // 这里只钉住"地址与超时确实来自 ResolvedLoginApiBaseUrl"。
-        using var provider = BuildFullProvider();
-        var factory = provider.GetRequiredService<IHttpClientFactory>();
-
-        var client = factory.CreateClient(nameof(ILoginAdminService));
-
-        Assert.Equal(new Uri(ServiceConfiguration.FlaskLoginBaseUrl), client.BaseAddress);
-        Assert.Equal(HttpTimeouts.Fast, client.Timeout);
+        Assert.IsType<LocalLoginAdminService>(provider.GetRequiredService<ILoginAdminService>());
     }
 
     [Fact]
     public void ServiceConfiguration_ShouldBeResolvable()
     {
-        // HttpLoginAdminService 靠注入它来判断 LOGIN_API_BASE_URL 是否配置。
-        // 此前 ServiceConfiguration 只是 Program.cs 里的一个局部变量，
-        // 谁都没法注入——这条守住它已经在 AddAllServices 里注册上了。
+        // 此前 ServiceConfiguration 只是 Program.cs 里的一个局部变量，谁都没法注入。
+        // 这条守住它已经在 AddAllServices 里注册上了。
         using var provider = BuildFullProvider();
 
         Assert.NotNull(provider.GetRequiredService<ServiceConfiguration>());
@@ -200,7 +212,17 @@ public class ServiceRegistrationTests
         return services.BuildServiceProvider();
     }
 
-    private static ServiceProvider BuildProvider(string? loginApiBaseUrl)
+    private static ServiceProvider BuildProvider(IConnectionMultiplexer? multiplexer = null)
+        => BuildServices(multiplexer).BuildServiceProvider();
+
+    /// <summary>
+    /// 只装配业务服务（<see cref="ServiceCollectionExtensions.AddBusinessServices"/>）。
+    /// <para>
+    /// 够登录那几条用例用；要激活控制器就必须走 <see cref="BuildFullProvider"/> 那条真实全量注册，
+    /// 否则缺的是哪一层都说不清。
+    /// </para>
+    /// </summary>
+    private static IServiceCollection BuildServices(IConnectionMultiplexer? multiplexer = null)
     {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -209,13 +231,58 @@ public class ServiceRegistrationTests
         // AddHttpClient 注册；这里替换成替身只是为了让测试不依赖它的真实行为。
         services.AddSingleton(new Mock<ICookieCodeService>().Object);
 
+        // ITestAccountResolver 由 AddTestAccountServices 注册（在 AddAllServices 里），
+        // 不在 AddBusinessServices 内，因此这里补一个替身——与上面同理。
+        services.AddSingleton(Mock.Of<ITestAccountResolver>());
+
+        if (multiplexer is not null)
+        {
+            services.AddSingleton(multiplexer);
+        }
+
         services.AddBusinessServices(new ServiceConfiguration
         {
             // 支付那段的必需项，缺了会直接抛
-            PaymentApiBaseUrl = "http://xauat-paymentapi:8080",
-            LoginApiBaseUrl = loginApiBaseUrl
+            PaymentApiBaseUrl = "http://xauat-paymentapi:8080"
         });
 
-        return services.BuildServiceProvider();
+        return services;
+    }
+
+    /// <summary>注册的生命周期。用来钉住 SsoLoginService 不能是单例（captive dependency）。</summary>
+    private static ServiceLifetime DescribeLifetime<T>(IServiceCollection services)
+        => services.First(descriptor => descriptor.ServiceType == typeof(T)).Lifetime;
+
+    /// <summary>
+    /// 把 handler 链一路剥到最内层（<c>DelegatingHandler._innerHandler</c>）。
+    /// 用反射是因为 <c>IHttpMessageHandlerFactory</c> 只给最外层
+    /// （<c>LifetimeTrackingHttpMessageHandler</c>），而我们要看的是被它包住的 primary handler。
+    /// <para>
+    /// 必须沿类型继承链找那个私有字段：<c>GetField</c> 不会去基类里翻私有成员，
+    /// 而 <c>_innerHandler</c> 声明在 <see cref="DelegatingHandler"/> 上。
+    /// </para>
+    /// </summary>
+    private static HttpMessageHandler Unwrap(HttpMessageHandler handler)
+    {
+        while (FindInner(handler) is { } inner)
+        {
+            handler = inner;
+        }
+
+        return handler;
+    }
+
+    private static HttpMessageHandler? FindInner(HttpMessageHandler handler)
+    {
+        for (var type = handler.GetType(); type is not null; type = type.BaseType)
+        {
+            var field = type.GetField("_innerHandler", BindingFlags.Instance | BindingFlags.NonPublic);
+            if (field?.GetValue(handler) is HttpMessageHandler inner)
+            {
+                return inner;
+            }
+        }
+
+        return null;
     }
 }

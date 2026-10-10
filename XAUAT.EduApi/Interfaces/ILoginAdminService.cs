@@ -3,16 +3,12 @@ using System.Text.Json.Serialization;
 namespace XAUAT.EduApi.Interfaces;
 
 /// <summary>
-/// XAUAT.LoginApi 的运维/统计数据读取：活跃用户数、封禁日志、解封。
+/// 登录子系统的运维/统计数据读取：活跃用户数、封禁日志、封禁状态、解封。
 /// <para>
-/// 与 <see cref="IPaymentService"/> 同源——这些数据只存在于独立的登录服务里，EduApi
-/// 不再自己实现，唯一实现是 <see cref="Services.HttpLoginAdminService"/>。本接口保留
-/// 是为了让控制器与代理实现解耦，便于测试中 mock。
-/// </para>
-/// <para>
-/// <b>为什么不让 lumaris_admin 直接访问 LoginApi</b>：管理端部署在别的主机上，而 LoginApi 的
-/// compose 刻意不映射宿主机端口（只在 <c>xauat-net</c> 上暴露 <c>xauat-loginapi:8080</c>，
-/// 见其 deploy/docker-compose.production.yml），EduApi 是唯一稳定可达的出口。
+/// 数据源是那套与 Flask 共用的 Redis 键（<c>sso-cookies-*</c> / <c>security:ban:*</c> /
+/// <c>security:ban_logs</c>）。这些数据原先在独立的 XAUAT.LoginApi 里，EduApi 经 HTTP 转发；
+/// 登录逻辑搬进来之后唯一实现是 <see cref="Login.LocalLoginAdminService"/>，直接读本地 Redis。
+/// 本接口保留是为了让控制器与实现解耦，便于测试中 mock。
 /// </para>
 /// </summary>
 public interface ILoginAdminService
@@ -25,6 +21,21 @@ public interface ILoginAdminService
 
     /// <summary>封禁日志（最新在前），可按学校/用户名过滤。上游固定只返回最近 200 条。</summary>
     Task<BanLogPage> GetBanLogsAsync(string? school, string? username);
+
+    /// <summary>
+    /// 查询某账号当前的封禁记录。
+    /// <para>
+    /// 这条能力原先由 LoginApi 的 <c>GET /security/ban_status</c> 承载。迁移时那条
+    /// Flask 形状的路由刻意没有搬过来，因此在这里补一个 EduApi 自己形状的出口——
+    /// 否则「查某账号是否被封」会随 LoginApi 一起消失，而封禁日志只告诉管理员
+    /// 「发生过什么」，不告诉他「现在是否仍然生效」。
+    /// </para>
+    /// <para>
+    /// 同时覆盖新旧两种键形状（见 <c>BanService.FindActiveBansAsync</c>），
+    /// 因此灰度期间 Redis 里并存的三段式旧键也能被查到。
+    /// </para>
+    /// </summary>
+    Task<BanStatusResult> GetBanStatusAsync(string school, string username);
 
     /// <summary>
     /// 按用户名解封。
@@ -47,7 +58,8 @@ public sealed record LoginUserCount
 /// <para>
 /// 字段名是 <b>snake_case</b>，且必须用 <see cref="JsonPropertyNameAttribute"/> 逐个钉死：
 /// <c>PropertyNameCaseInsensitive</c> 只兜大小写差异，<c>CreatedAt</c> 对不上 <c>created_at</c>，
-/// 漏一个就会静默反序列化成默认值（<c>HttpLoginService</c> 的类注释记过这个坑）。
+/// 漏一个就会静默反序列化成默认值（<c>HttpLoginService</c> 当年就踩过这个坑——
+/// 它已随本次迁移删除，但教训适用于所有跨 snake_case 边界的 DTO）。
 /// </para>
 /// <para>
 /// 这两个类型同时就是**回给管理端的响应体**（<c>ApiResponse&lt;T&gt;.Data</c>），
@@ -62,7 +74,7 @@ public sealed record BanLogPage
 }
 
 /// <summary>
-/// 一条封禁日志。已被 LoginApi 归一化，抹平了 <c>auto_ban</c> / <c>manual_unban</c>
+/// 一条封禁日志。已被 <c>BanService</c> 归一化，抹平了 <c>auto_ban</c> / <c>manual_unban</c>
 /// 两种存储形状的差异。
 /// </summary>
 public sealed record BanLogItem
@@ -108,4 +120,56 @@ public sealed record UnbanResult
     public bool Success { get; init; }
 
     public string Message { get; init; } = "";
+}
+
+/// <summary>
+/// <c>GET v1/login-ops/ban-status</c> 的响应。
+/// <para>
+/// <see cref="Items"/> 的形状逐字沿用 LoginApi 的 <c>GET /security/ban_status</c>
+/// （snake_case，含运行时注入的 <c>ttl</c> 与 <c>key</c>），这样接管那条能力的调用方
+/// 不需要改字段名。
+/// </para>
+/// </summary>
+public sealed record BanStatusResult
+{
+    /// <summary>是否存在至少一条仍然生效的封禁记录。</summary>
+    public bool Banned { get; init; }
+
+    public List<BanItem> Items { get; init; } = [];
+}
+
+/// <summary>
+/// 单条封禁记录。键名与 Flask <c>get_ban_status</c> / <c>list_bans_for_user</c>
+/// 返回的 dict 完全一致，因此用 <see cref="JsonPropertyNameAttribute"/> 逐个钉死
+/// snake_case——<c>PropertyNameCaseInsensitive</c> 只兜大小写差异，兜不住下划线。
+/// </summary>
+public sealed record BanItem
+{
+    [JsonPropertyName("account")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Account { get; init; }
+
+    [JsonPropertyName("reason")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Reason { get; init; }
+
+    [JsonPropertyName("banned_at")] public long BannedAt { get; init; }
+
+    [JsonPropertyName("unban_at")] public long UnbanAt { get; init; }
+
+    /// <summary>剩余 TTL 秒数（Redis TTL 原样透出，-1 表示永不过期，-2 表示键不存在）。</summary>
+    [JsonPropertyName("ttl")] public long Ttl { get; init; }
+
+    /// <summary>完整 Redis 键名，仅 <c>list_bans_for_user</c> 路径带。</summary>
+    [JsonPropertyName("key")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Key { get; init; }
+
+    /// <summary>
+    /// Redis 里的值不是合法 JSON 时的兜底：Flask 会把它原样塞进 <c>raw</c> 键并照常返回
+    /// （见 <c>redis_client.get_ban_status</c> 的 <c>except: data = {"raw": raw}</c>）。
+    /// </summary>
+    [JsonPropertyName("raw")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Raw { get; init; }
 }

@@ -33,6 +33,16 @@
       <ProjectReference Include="..\EduApi.Data\EduApi.Data.csproj" />
     </ItemGroup>
 
+    <!--
+      登录子系统（Login/）整块是 internal 的：它是从 XAUAT.LoginApi 整段搬进来的内聚子系统，
+      不是本项目的 API 面（对外契约是 Controllers/V1 上的那几个控制器）。
+      测试要直接驱动 SsoAuthService / BanService / XauatHtmlParser 这些内部类型，
+      因此按 LoginApi 的既有做法开这个后门。
+    -->
+    <ItemGroup>
+      <InternalsVisibleTo Include="XAUAT.EduApi.Tests" />
+    </ItemGroup>
+
     <ItemGroup>
       <Folder Include="Repos\" />
     </ItemGroup>

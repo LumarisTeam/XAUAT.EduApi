@@ -5,12 +5,15 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Options;
 using NpgsqlDataProtection;
 using StackExchange.Redis;
+using System.Net;
 using System.Threading.RateLimiting;
 using XAUAT.EduApi.Caching;
 using XAUAT.EduApi.Configuration;
 using XAUAT.EduApi.Filters;
 using XAUAT.EduApi.Interfaces;
 using XAUAT.EduApi.Localization;
+using XAUAT.EduApi.Login;
+using XAUAT.EduApi.Login.Xauat;
 using XAUAT.EduApi.Queues;
 using XAUAT.EduApi.Repos;
 using XAUAT.EduApi.Services;
@@ -109,7 +112,7 @@ public static class ServiceCollectionExtensions
         public IServiceCollection AddBusinessServices(ServiceConfiguration configuration)
         {
             // 把配置本身也放进容器：此前它只在 Program.cs 里以局部变量存在，谁都注入不到，
-            // 而现在 HttpLoginAdminService 要读它判断 LOGIN_API_BASE_URL 是否配置。
+            // 而 AddLoginServices 里的 typed client 与若干服务要读它。
             // 注册在这里（而不是 Program.cs）是为了让 AddAllServices 自成闭环——
             // 组合根守护测试（Tests/Extensions/ServiceRegistrationTests.cs）只跑 AddAllServices，
             // 放外面它就会缺这一项。
@@ -121,30 +124,11 @@ public static class ServiceCollectionExtensions
             services.AddScoped<IExamService, ExamService>();
             services.AddScoped<IProgramService, ProgramService>();
             services.AddScoped<IInfoService, InfoService>();
-            // 登录：转发到独立的登录服务（XAUAT.LoginApi），**留空则回落**到 Flask 的
-            // schedule.xauat.site——与支付不同，这里刻意保留回退：灰度期间改一个环境变量
-            // 就能在两个实现间来回切，回滚不需要回退镜像。
-            // 回退地址在这里解析掉，HttpLoginService 内部因此不必感知这层分支。
-            // 与支付同理，不挂 AddPolicyHandler：EduApi 的 GetRetryPolicy() 基于
-            // HandleTransientHttpError()，会把 5xx 一并重试；而登录只需要重试传输层错误，
-            // 那段策略留在 HttpLoginService 内部（见其注释）。
-            services.AddHttpClient<ILoginService, HttpLoginService>(client =>
-            {
-                client.BaseAddress = new Uri(configuration.ResolvedLoginApiBaseUrl);
-                // 20s：登录要跨 CAS → 教务两跳上游，HttpTimeouts 里 Slow 就是给登录/支付的
-                client.Timeout = HttpTimeouts.Slow;
-            });
 
-            // 登录服务的运维/统计数据（活跃用户数、封禁日志、解封）。与登录共用 base URL，
-            // 但刻意是独立的 typed client：调用方不同（管理端而非学生），失败语义也不同
-            // （连不上回 503 而不是 500），混在一个 client 里只会让两边的超时与重试互相迁就。
-            // 与上面同理，不挂 AddPolicyHandler——重试策略留在服务内部。
-            services.AddHttpClient<ILoginAdminService, HttpLoginAdminService>(client =>
-            {
-                client.BaseAddress = new Uri(configuration.ResolvedLoginApiBaseUrl);
-                // 10s：两个纯查询 GET + 一个解封，都不跨教务系统，用不上 Slow
-                client.Timeout = HttpTimeouts.Fast;
-            });
+            // 登录：EduApi 自己做完整的 CAS/UAAP 握手与封禁编排，见 Login/。
+            // 原先这里是两个 AddHttpClient<ILoginService/ILoginAdminService, HttpXxx>，
+            // 把请求转给独立的 XAUAT.LoginApi；那个服务已退出调用链。
+            services.AddLoginServices();
 
             // 支付：EduApi 不再内置实现，一律转发到 XAUAT.PaymentAPI
             var paymentApiBaseUrl = configuration.PaymentApiBaseUrl;
@@ -186,6 +170,62 @@ public static class ServiceCollectionExtensions
             services.AddSingleton<IElectricityNotificationQueue, ChannelElectricityNotificationQueue>();
             services.AddHostedService<ElectricitySubscriptionMonitorBackgroundService>();
             services.AddHostedService<ElectricityNotificationBackgroundService>();
+
+            return services;
+        }
+
+        /// <summary>
+        /// 注册登录子系统（见 <c>Login/</c>）。从 <see cref="AddBusinessServices"/> 调用。
+        /// <para>
+        /// 整块是从 XAUAT.LoginApi 搬过来的：CAS 协议层 + 裸 <c>IDatabase</c> 存储 +
+        /// 登录三级优先级编排 + 两级限流封禁。它自己那一套 Redis 键名**刻意不带任何前缀**
+        /// （与 Flask 共用，见 <c>LoginCacheKeys</c>），因此**不能**改走本仓库的
+        /// <c>ICacheService</c>——那会给键加 <c>EduApi:</c> 前缀并把值包成 JSON 信封。
+        /// </para>
+        /// </summary>
+        public IServiceCollection AddLoginServices()
+        {
+            // 单例：四个都是无状态的（状态要么在方法局部，要么在 IDatabase 里），
+            // 与既有的 IStudentRateLimitState 同为单例一个道理。
+            services.AddSingleton<ILoginRedisStore, LoginRedisStore>();
+            services.AddSingleton<BanService>();
+            services.AddSingleton<StatisticsService>();
+            services.AddSingleton<SsoAuthService>();
+
+            // 认证服务器客户端。**必须**关掉自动重定向与自动 cookie 管理：
+            //   关自动重定向 —— 换票逻辑靠"逐跳捕获 Set-Cookie"（教务会话种在跳转链第 2 跳），
+            //                    自动跟随会把中间响应丢掉，表现为所有人登录都报"未能获取有效会话"；
+            //   关自动 cookie —— CookieContainer 的生命周期绑在池化的 HttpMessageHandler 上，
+            //                    共享会让并发登录串号（A 的教务会话被 B 覆盖）。
+            //                    cookie 由每次调用新建的 XauatCookieJar 显式管理。
+            // 也刻意不挂 AddPolicyHandler(PollyExtensions.GetRetryPolicy())：那个策略基于
+            // HandleTransientHttpError()，会把 5xx 一并重试，而登录只该重试传输层错误。
+            services.AddHttpClient(XauatSsoClient.ClientName)
+                .ConfigureHttpClient(client =>
+                {
+                    client.Timeout = XauatConstants.AuthServerTimeout;
+                    client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", XauatConstants.UserAgent);
+                    client.DefaultRequestHeaders.TryAddWithoutValidation("Accept", XauatConstants.AcceptHtml);
+                    client.DefaultRequestHeaders.TryAddWithoutValidation("Accept-Language", XauatConstants.AcceptLanguage);
+                    client.DefaultRequestHeaders.TryAddWithoutValidation("Upgrade-Insecure-Requests", "1");
+                })
+                .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+                {
+                    AllowAutoRedirect = false,
+                    UseCookies = false,
+                    AutomaticDecompression = DecompressionMethods.All,
+                    PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+                });
+
+            // 认证服务器需要会话化调用（先 GET 登录页拿 lt/execution，再 POST），
+            // 因此单例持有 IHttpClientFactory 而不是 HttpClient
+            services.AddSingleton<IXauatSsoClient, XauatSsoClient>();
+
+            // Scoped（不是单例）：SsoLoginService 依赖 Scoped 的 ICookieCodeService，
+            // 注册成单例就是 captive dependency——Development 下每次请求抛异常，
+            // Production 下静默捕获它直到进程结束。EduApi 其余业务服务同为 Scoped。
+            services.AddScoped<ILoginService, SsoLoginService>();
+            services.AddScoped<ILoginAdminService, LocalLoginAdminService>();
 
             return services;
         }

@@ -83,8 +83,8 @@ sed -i 's#^PAYMENT_API_BASE_URL=.*#PAYMENT_API_BASE_URL=http://xauat-paymentapi:
 chmod 600 .env
 ```
 
-`PAYMENT_API_BASE_URL` 是必需项，缺失时 EduApi 启动即失败。`LOGIN_API_BASE_URL` 留空则
-登录仍直连 Flask，填 `http://xauat-loginapi:8080` 则转发到 XAUAT.LoginApi。
+`PAYMENT_API_BASE_URL` 是必需项，缺失时 EduApi 启动即失败。登录没有上游服务——EduApi 自己
+做 CAS/UAAP 握手，`REDIS` 就是登录缓存与封禁状态的存放处（留空则退化为无缓存、无限流）。
 
 之后每次发布：
 
