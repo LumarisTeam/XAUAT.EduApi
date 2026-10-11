@@ -40,6 +40,15 @@ public class ServiceConfiguration
     public string? PaymentApiBaseUrl { get; set; }
 
     /// <summary>
+    /// 通用统一身份认证接口（<c>/v1/login/unified</c>）允许访问的目标域名，
+    /// 逗号分隔，支持 <c>*.域</c> 通配（如 <c>*.example.com</c>）与 <c>*</c>（全部放开）。
+    /// <para>
+    /// 内置默认 <c>*.edu.cn</c> 且**只能追加、不能覆盖**；留空即只放行教育网域名。
+    /// </para>
+    /// </summary>
+    public string? UnifiedAuthAllowedHosts { get; set; }
+
+    /// <summary>
     /// 从环境变量中创建ServiceConfiguration实例
     /// </summary>
     /// <returns>ServiceConfiguration实例</returns>
@@ -52,7 +61,9 @@ public class ServiceConfiguration
             EnablePrometheus = EnvironmentVariableHelper.GetBoolOrDefault(true, "PROMETHEUS_ENABLED", "Prometheus__Enabled"),
             EnableLogging = EnvironmentVariableHelper.GetBoolOrDefault(true, "LOGGING_ENABLED", "Logging__Enabled"),
             TestAccount = EnvironmentVariableHelper.BuildTestAccountOptions(),
-            PaymentApiBaseUrl = EnvironmentVariableHelper.GetString("PAYMENT_API_BASE_URL", "PaymentApi__BaseUrl")
+            PaymentApiBaseUrl = EnvironmentVariableHelper.GetString("PAYMENT_API_BASE_URL", "PaymentApi__BaseUrl"),
+            UnifiedAuthAllowedHosts = EnvironmentVariableHelper.GetString(
+                "UNIFIED_AUTH_ALLOWED_HOSTS", "UnifiedAuth__AllowedHosts")
         };
     }
 }

@@ -12,6 +12,7 @@
 
 ### 教务相关
 - **登录认证** - 用户登录验证
+- **通用统一身份认证** - 只填目标 URL + 学号密码，自动发现 CAS 并换取 cookie（`POST /v1/login/unified`）
 - **课程信息** - 获取学生课程表
 - **成绩查询** - 查询各学期考试成绩
 - **考试安排** - 获取考试时间安排
@@ -50,6 +51,7 @@ cp .env.example .env
 | ELECTRICITY_SUBSCRIPTION_SCAN_INTERVAL_MINUTES | 电费订阅扫描间隔（分钟） | `15` |
 | SMTP_HOST | SMTP 服务器地址 | `smtp.qq.com` |
 | TEST_ACCOUNT_ENABLED | 是否启用测试账号 | `false` |
+| UNIFIED_AUTH_ALLOWED_HOSTS | 通用统一身份认证允许访问的目标域名（逗号分隔，支持 `*.域` 与 `*`；内置默认 `*.edu.cn` 且只能追加） | `*.example.com` |
 | LOG_VIEW_TOKEN | 日志接口访问令牌（设置后启用鉴权） | `change-me` |
 
 ## 部署方式
@@ -143,6 +145,27 @@ dotnet run --project XAUAT.EduApi
 ## API 接口文档
 
 项目集成了 Scalar API 文档，启动后可通过 `/scalar/v1` 路径访问详细的接口文档。
+
+### 通用统一身份认证
+
+`POST /v1/login/unified` —— 只要目标系统用 CAS / 金智 UAAP 做统一认证，填一个受保护的地址加学号密码就能换到 cookie：
+
+```bash
+curl -X POST http://localhost:5216/v1/login/unified \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://swjw.xauat.edu.cn/student/index","username":"2023xxxx","password":"..."}'
+```
+
+服务端会依次：请求该地址 → 顺着 302 **以及页面里的前端跳转线索**找到认证服务器登录页（连 `service` 参数一起）→ 按页面隐藏域与 `pwdEncryptSalt` 组装表单并登录 → 沿原路跳回，把沿途 cookie 一并返回。响应里的 `cookie` 是**落地站点**那一份会话 cookie，可直接用于后续抓取；`cookies` 是整条链路的全量明细（含 CASTGC 票据）。
+
+> 为什么要读页面线索：新版树维/金智教务前台（如 `swjw.xauat.edu.cn/student/index`）不会一路 302 到 CAS，中间会回一个 200 的前端空壳（`/student/login`），真正的 SSO 入口写在页面 JS 的 `ssoLinkList` 里。只跟 302 的实现会停在这一跳，误报"该地址未跳转到统一身份认证登录页"。
+
+几点约定：
+
+- **目标域名白名单**：默认只放行 `*.edu.cn`，用 `UNIFIED_AUTH_ALLOWED_HOSTS` 追加（只能加不能减）。
+- **内网地址一律拒绝**：校验发生在建立 TCP 连接之前，合法域名被解析到 `127.0.0.1` / `10.x` / `169.254.169.254` 同样会被拦下。
+- **不接缓存**：与 `POST /v1/login` 不同，这个接口每次都真实登录一次（cookie 自然轮换），不写 Redis、不计入封禁体系。
+- 失败映射：请求不合法 → 400，用户名密码错 → 401，目标站点不可达 → 502，并发限流 → 429。
 
 ### 日志查询
 

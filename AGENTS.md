@@ -88,6 +88,26 @@ Also load-bearing: `XauatAuthClient` is registered with `AllowAutoRedirect = fal
 `UseCookies = false`. Turning either on makes *every* login fail with a plausible-looking
 upstream error. Guarded by `Tests/Extensions/ServiceRegistrationTests.cs`.
 
+### Unified Authentication (`XAUAT.EduApi/Login/Unified/`)
+
+A **generic** CAS / 金智 UAAP login: the caller passes only a protected target URL plus
+credentials (`POST /v1/login/unified`), and the server discovers the auth server from the
+redirect chain (the login page URL carries the `service` parameter), parses the page's hidden
+inputs + `pwdEncryptSalt`, submits the form, then walks the redirects back to plant the session
+cookie. Unlike `Login/`, it uses **no Redis** — every call really logs in, so cookies rotate.
+
+Two things here are security-relevant and easy to weaken by accident:
+
+- **The host allow list** (`HostAllowList`, default `*.edu.cn`, extended — never replaced — by
+  `UNIFIED_AUTH_ALLOWED_HOSTS`). The endpoint takes an arbitrary URL, so without it the service
+  is an open SSRF proxy.
+- **`UnifiedConnectGuard` on `SocketsHttpHandler.ConnectCallback`.** The allow list only checks
+  the *name*; a legitimate `.edu.cn` host can still resolve to `127.0.0.1` or `169.254.169.254`
+  (DNS rebinding, poisoned internal DNS). Resolving and validating at connect time means the
+  check and the connection use the *same* IP. `UseProxy = false` is part of the same defense:
+  with a proxy the connection is made by the proxy and the callback never runs. Guarded by
+  `Tests/Extensions/ServiceRegistrationTests.cs` and `Tests/Login/Unified/`.
+
 ### Database Configuration
 
 - **Development**: SQLite (`Data.db` file)
@@ -102,6 +122,7 @@ upstream error. Guarded by `Tests/Extensions/ServiceRegistrationTests.cs`.
 | `REDIS` | Redis connection string |
 | `START`, `END` | Semester first/last day (`yyyy-MM-dd`). `START` anchors the calendar's week-number expansion |
 | `PAYMENT_API_BASE_URL` | XAUAT.PaymentAPI base URL; **required** — startup fails if missing |
+| `UNIFIED_AUTH_ALLOWED_HOSTS` | Extra target hosts for `POST /v1/login/unified` (comma-separated, `*.domain` or `*`). Built-in `*.edu.cn` is always kept |
 
 ### Time zone
 

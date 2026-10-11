@@ -19,4 +19,11 @@ public static class ApiMessageKey
     public const string PaymentTurnoverUnknownError = nameof(PaymentTurnoverUnknownError);
     public const string LoginOpsTokenRequired = nameof(LoginOpsTokenRequired);
     public const string LoginOpsUsernameRequired = nameof(LoginOpsUsernameRequired);
+
+    // 通用统一身份认证（/v1/login/unified）
+    public const string UnifiedAuthParamRequired = nameof(UnifiedAuthParamRequired);
+    public const string UnifiedAuthInvalidTarget = nameof(UnifiedAuthInvalidTarget);
+    public const string UnifiedAuthHostNotAllowed = nameof(UnifiedAuthHostNotAllowed);
+    public const string UnifiedAuthNotCasProtected = nameof(UnifiedAuthNotCasProtected);
+    public const string UnifiedAuthBlockedTarget = nameof(UnifiedAuthBlockedTarget);
 }

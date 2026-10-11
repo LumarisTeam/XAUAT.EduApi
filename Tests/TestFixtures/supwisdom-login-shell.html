@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+	<title>登入页面</title>
+  <meta charset="utf-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,initial-scale=1.0,user-scalable=no" />
+  <link rel="icon" href="/student/static/favicon.png" />
+  <script>
+    // 设置 context path, js会需要用
+    window.CONTEXT_PATH = '/student';
+    window.CDN_PATH = '';
+    window.LOCALE = 'zh';
+  </script>
+  <script src="/student/static/authc-local/assets/js/jquery/jquery.min.js"></script>
+  <script src="/student/static/authc-local/assets/js/vue/vue.min.js"></script>
+  <link rel="stylesheet" type="text/css" href="/student/static/authc-local/assets/style/style.css?v=02" />
+  <script type="text/javascript" src="/student/static/cryptoJS/sha1.js"></script>
+  <script type="text/javascript" src="/student/static/cryptoJS/md5.js"></script>
+</head>
+
+<body>
+
+<div id="vue_main">
+
+</div>
+
+<script src="/student/static/eams-ui/js/require.js"></script>
+<script type="text/javascript">
+  // <![CDATA[
+
+  window.onload = function () {
+    if (top.location.href != self.location.href) {
+      top.location.href = self.location.href;
+    }
+    let data = {};
+    data.NEED_CAPTCHA = null;
+    data.finereportPrefixUrl = '<internal-report-placeholder>';
+    data.passwordSecurityCenterUrl = '<security-center-placeholder>';
+    data.downloadAppEnabled = false;
+    data.passwordResetEnabled = true;
+    data.accountActivationEnabled = false;
+    let _warmTip = ('\u4E3A\u4E86\u60A8\u7684\u8D26\u53F7\u5B89\u5168\uFF0C\u767B\u5F55\u6559\u52A1\u7BA1\u7406\u7CFB\u7EDF\u540E\u8BF7\u53CA\u65F6\u4FEE\u6539\u521D\u59CB\u5BC6\u7801\u3002') || '';
+    data.warmTip = _warmTip.trim() || '';
+    data.copyright = '<copyright-placeholder>';
+    data.ssoLinkList = [{'entiry':'/sso/login'}];
+
+    require.config({
+      baseUrl: window.CONTEXT_PATH + '/static/authc-local',
+      paths: {
+        text: window.CONTEXT_PATH + '/static/eams-ui/js/text'
+      },
+      urlArgs: 'v=1.0.3'
+    });
+
+
+    require(['main'], function (main) {
+      main.init(data);
+    });
+  }
+
+  // ]]>
+</script>
+
+</body>
+
+</html>

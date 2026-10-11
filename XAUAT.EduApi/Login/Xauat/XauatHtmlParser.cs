@@ -74,6 +74,55 @@ internal static partial class XauatHtmlParser
     }
 
     /// <summary>
+    /// 判断一个页面是不是统一身份认证的登录页。
+    /// <para>
+    /// 通用统一认证就是靠这个从跳转链里"认出"登录页的，因此判定必须<b>宽松</b>：
+    /// 命中 CAS 的 <c>execution</c> 隐藏域、UAAP 的 <c>#pwdEncryptSalt</c>、
+    /// 或最朴素的 username + password 输入框，任一成立即算。
+    /// </para>
+    /// </summary>
+    public static bool LooksLikeCasLoginPage(string html)
+    {
+        if (FindInputTag(html, "id", "pwdEncryptSalt") is not null) return true;
+        if (FindInputTag(html, "name", "execution") is not null) return true;
+        if (FindInputTag(html, "name", "lt") is not null) return true;
+
+        return FindInputTag(html, "name", "username") is not null &&
+               FindInputTag(html, "name", "password") is not null;
+    }
+
+    /// <summary>
+    /// 页面上全部 <c>type="hidden"</c> 输入框的 name/value（按出现顺序，同名取第一个）。
+    /// <para>
+    /// 通用统一认证用它做"原样透传"：各校 CAS 皮肤之间真正会变的只有这些隐藏域，
+    /// 透传之后换一套皮肤不用改代码。属性缺失的 <c>value</c> 记为空串。
+    /// </para>
+    /// </summary>
+    public static List<(string Name, string Value)> ParseHiddenInputs(string html)
+    {
+        var inputs = new List<(string, string)>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (Match tag in InputTagRegex().Matches(html))
+        {
+            var attributes = ParseAttributes(tag.Value);
+
+            if (!attributes.TryGetValue("type", out var type) ||
+                !string.Equals(type, "hidden", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!attributes.TryGetValue("name", out var name) || name.Length == 0) continue;
+            if (!seen.Add(name)) continue;
+
+            inputs.Add((name, GetAttributeValue(attributes, "value") ?? ""));
+        }
+
+        return inputs;
+    }
+
+    /// <summary>
     /// 找到第一个满足 <paramref name="matchAttribute"/> == <paramref name="matchValue"/> 的
     /// <c>&lt;input&gt;</c> 标签，返回它全部属性的字典（属性名小写）。
     /// </summary>

@@ -1,4 +1,5 @@
 using System.Text;
+using XAUAT.EduApi.Login.Unified;
 using XAUAT.EduApi.Login.Xauat;
 
 namespace XAUAT.EduApi.Tests.Login.Xauat;
@@ -59,5 +60,48 @@ public class RealFixtureTests
 
         Assert.Equal(string.Empty, fields.Lt);
         Assert.NotNull(fields.Lt);
+    }
+
+    /// <summary>
+    /// 通用统一身份认证靠"页面像不像登录页"来决定要不要提交凭据，
+    /// 这个判定必须在真实页面上成立——否则表现是"接口说该地址不需要认证"。
+    /// </summary>
+    [Fact]
+    public void LooksLikeCasLoginPage_OnRealCasPage_ShouldBeTrue()
+    {
+        Assert.True(XauatHtmlParser.LooksLikeCasLoginPage(Read("cas-login-page.html")));
+    }
+
+    /// <summary>
+    /// 通用接口把页面上的 <c>type="hidden"</c> 原样透传后再提交，因此这些字段
+    /// （<c>lt</c>/<c>execution</c>/<c>_eventId</c>）必须在真实样本里能被取到。
+    /// <para>
+    /// 同时钉住一条容易搞错的边界：<c>pwdEncryptSalt</c> 只有 <c>id</c> 没有 <c>type="hidden"</c>，
+    /// 它<b>不该</b>出现在透传字段里——它的用途是当 AES 密钥，混进表单没有意义。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void ParseHiddenInputs_OnRealCasPage_ShouldCarryFormFieldsButNotTheSalt()
+    {
+        var inputs = XauatHtmlParser.ParseHiddenInputs(Read("cas-login-page.html"));
+        var byName = inputs.ToDictionary(input => input.Name, input => input.Value);
+
+        Assert.Equal("e1s1", byName["execution"]);
+        Assert.Equal("submit", byName["_eventId"]);
+        Assert.DoesNotContain("pwdEncryptSalt", byName.Keys);
+    }
+
+    // ================================================================ 教务系统自己的前端登录壳
+
+    /// <summary>
+    /// 真实链路的第二跳是教务系统的前端登录壳（200、没有表单，SSO 入口只写在 JS 里）。
+    /// 通用统一认证靠这里挖出下一跳，挖不到就会误报"该地址未跳转到统一身份认证登录页"。
+    /// </summary>
+    [Fact]
+    public void CasDiscoveryHints_OnRealFrontEndShell_ShouldFindSiteSsoEntry()
+    {
+        var candidates = CasDiscoveryHints.FindCandidates(Read("supwisdom-login-shell.html"));
+
+        Assert.Contains("/student/sso/login", candidates);
     }
 }

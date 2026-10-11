@@ -123,6 +123,16 @@ internal sealed class XauatCookieJar
     public bool HasCookiesFor(string host)
         => _entries.Any(entry => Matches(entry.Host, host));
 
+    /// <summary>
+    /// 罐内全部 cookie 的快照（按写入顺序，跨 host）。
+    /// <para>
+    /// 供通用统一认证接口把"整条跳转链上的 cookie"连归属 host 一起交给调用方
+    /// （<see cref="AllAsString"/> 只有值，丢了归属就没法按站点分发）。
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<(string Host, string Name, string Value)> Snapshot()
+        => _entries.Select(entry => (entry.Host, entry.Name, entry.Value)).ToList();
+
     private static bool Matches(string cookieHost, string host)
         => string.Equals(cookieHost, host, StringComparison.OrdinalIgnoreCase)
            || (cookieHost.StartsWith('.') &&

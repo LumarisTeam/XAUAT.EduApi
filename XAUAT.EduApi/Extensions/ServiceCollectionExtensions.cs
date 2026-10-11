@@ -13,6 +13,7 @@ using XAUAT.EduApi.Filters;
 using XAUAT.EduApi.Interfaces;
 using XAUAT.EduApi.Localization;
 using XAUAT.EduApi.Login;
+using XAUAT.EduApi.Login.Unified;
 using XAUAT.EduApi.Login.Xauat;
 using XAUAT.EduApi.Queues;
 using XAUAT.EduApi.Repos;
@@ -128,7 +129,7 @@ public static class ServiceCollectionExtensions
             // 登录：EduApi 自己做完整的 CAS/UAAP 握手与封禁编排，见 Login/。
             // 原先这里是两个 AddHttpClient<ILoginService/ILoginAdminService, HttpXxx>，
             // 把请求转给独立的 XAUAT.LoginApi；那个服务已退出调用链。
-            services.AddLoginServices();
+            services.AddLoginServices(configuration);
 
             // 支付：EduApi 不再内置实现，一律转发到 XAUAT.PaymentAPI
             var paymentApiBaseUrl = configuration.PaymentApiBaseUrl;
@@ -183,7 +184,7 @@ public static class ServiceCollectionExtensions
         /// <c>ICacheService</c>——那会给键加 <c>EduApi:</c> 前缀并把值包成 JSON 信封。
         /// </para>
         /// </summary>
-        public IServiceCollection AddLoginServices()
+        public IServiceCollection AddLoginServices(ServiceConfiguration configuration)
         {
             // 单例：四个都是无状态的（状态要么在方法局部，要么在 IDatabase 里），
             // 与既有的 IStudentRateLimitState 同为单例一个道理。
@@ -226,6 +227,37 @@ public static class ServiceCollectionExtensions
             // Production 下静默捕获它直到进程结束。EduApi 其余业务服务同为 Scoped。
             services.AddScoped<ILoginService, SsoLoginService>();
             services.AddScoped<ILoginAdminService, LocalLoginAdminService>();
+
+            // ---- 通用统一身份认证（/v1/login/unified，见 Login/Unified/）
+            // 与上面的 XAUAT 专用客户端**刻意分成两个命名客户端**：通用客户端要额外挂
+            // "建连前丢弃内网地址"（UnifiedConnectGuard）并禁用代理，而把这两条加到
+            // XauatAuthClient 上等于给既有的教务登录链路增加失败点，收益为零。
+            services.AddSingleton(HostAllowList.Create(configuration.UnifiedAuthAllowedHosts));
+
+            services.AddHttpClient(UnifiedSsoClient.ClientName)
+                .ConfigureHttpClient(client =>
+                {
+                    client.Timeout = XauatConstants.AuthServerTimeout;
+                    client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", XauatConstants.UserAgent);
+                    client.DefaultRequestHeaders.TryAddWithoutValidation("Accept", XauatConstants.AcceptHtml);
+                    client.DefaultRequestHeaders.TryAddWithoutValidation("Accept-Language", XauatConstants.AcceptLanguage);
+                    client.DefaultRequestHeaders.TryAddWithoutValidation("Upgrade-Insecure-Requests", "1");
+                })
+                .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+                {
+                    // 同 XauatAuthClient：重定向与 cookie 都由调用方手工管理（见 UnifiedSsoClient）
+                    AllowAutoRedirect = false,
+                    UseCookies = false,
+                    // 走代理时 TCP 连接由代理建立，ConnectCallback 里的地址校验就形同虚设，
+                    // 而那道校验正是防 SSRF 的第二道闸——因此这里必须显式关掉代理。
+                    UseProxy = false,
+                    AutomaticDecompression = DecompressionMethods.All,
+                    PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+                    ConnectCallback = UnifiedConnectGuard.ConnectAsync
+                });
+
+            services.AddSingleton<IUnifiedSsoClient, UnifiedSsoClient>();
+            services.AddScoped<IUnifiedAuthService, UnifiedAuthService>();
 
             return services;
         }

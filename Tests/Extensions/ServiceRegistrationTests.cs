@@ -11,6 +11,7 @@ using XAUAT.EduApi.Extensions;
 using XAUAT.EduApi.Interfaces;
 using XAUAT.EduApi.Logging;
 using XAUAT.EduApi.Login;
+using XAUAT.EduApi.Login.Unified;
 using XAUAT.EduApi.Login.Xauat;
 using XAUAT.EduApi.Services;
 
@@ -125,6 +126,39 @@ public class ServiceRegistrationTests
         using var provider = BuildFullProvider();
 
         Assert.IsType<CalendarService>(provider.GetRequiredService<ICalendarService>());
+    }
+
+    /// <summary>
+    /// 通用统一身份认证客户端的 handler 开关。
+    /// <para>
+    /// 与 <see cref="XauatAuthClient_ShouldDisableAutoRedirectAndCookieHandling"/> 同理，
+    /// 但多两条是 SSRF 防线的组成部分：
+    /// <c>UseProxy = false</c>——走代理时 TCP 连接由代理建立，<c>ConnectCallback</c> 里的
+    /// 内网地址校验就形同虚设；<c>ConnectCallback</c> 必须真的挂上，
+    /// 光有域名白名单挡不住"合法域名被解析到 127.0.0.1"。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void UnifiedAuthClient_ShouldDisableProxyAndAutoRedirect_AndGuardConnect()
+    {
+        using var provider = BuildFullProvider();
+        var handlerFactory = provider.GetRequiredService<IHttpMessageHandlerFactory>();
+
+        using var handler = handlerFactory.CreateHandler(UnifiedSsoClient.ClientName);
+        var sockets = Assert.IsType<SocketsHttpHandler>(Unwrap(handler));
+
+        Assert.False(sockets.AllowAutoRedirect, "通用认证客户端必须关掉自动重定向（票据在 302 那一跳上）");
+        Assert.False(sockets.UseCookies, "通用认证客户端必须关掉自动 cookie（并发登录会串号）");
+        Assert.False(sockets.UseProxy, "必须禁用代理，否则建连前的内网地址校验会被绕过");
+        Assert.NotNull(sockets.ConnectCallback);
+    }
+
+    [Fact]
+    public void UnifiedAuthService_ShouldBeResolvable()
+    {
+        using var provider = BuildFullProvider();
+
+        Assert.IsType<UnifiedAuthService>(provider.GetRequiredService<IUnifiedAuthService>());
     }
 
     [Fact]

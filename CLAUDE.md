@@ -54,6 +54,7 @@ dotnet run -c Release --project Tests/XAUAT.EduApi.Tests.csproj -- --filter "*Pe
 | Controller | Purpose |
 |------------|---------|
 | `LoginController` | SSO login. Does the CAS/UAAP handshake itself, returns cookies for subsequent requests |
+| `UnifiedAuthController` | Generic unified auth (`v1/login/unified`). One target URL + credentials → discovers the CAS login page, logs in, returns the cookies. Host allow list + private-address guard; no Redis |
 | `LoginOpsController` | Login ops (`v1/login-ops`): active user count, ban logs, ban status, unban. Reads the shared Redis directly; requires `MAP_ADMIN_TOKEN` |
 | `CourseController` | Course schedules, campus timetable (`ScheduleTime`) |
 | `CalendarController` | ICS calendar subscription (`v1/course/Calendar`) |
@@ -98,6 +99,7 @@ The project uses **DotNetEnv** to load configuration from a `.env` file at the s
 | `TEST_ACCOUNT_ENABLED` | Enable test account bypass (default false) |
 | `PROMETHEUS_ENABLED` | Enable Prometheus metrics (default true) |
 | `PAYMENT_API_BASE_URL` | XAUAT.PaymentAPI base URL; **required** — startup fails if missing |
+| `UNIFIED_AUTH_ALLOWED_HOSTS` | Extra target hosts for `POST /v1/login/unified` (comma-separated, `*.domain` or `*`). Built-in `*.edu.cn` is always kept, so this only ever **adds** |
 | `START`, `END` | Semester first/last day (`yyyy-MM-dd`). Read by `IInfoService.GetTime()`; `START` is also the anchor the calendar expands week numbers from, so a wrong value shifts every course event by whole weeks |
 
 ### Database
@@ -177,6 +179,29 @@ non-obvious and fail **silently** if broken:
 Also load-bearing: `XauatAuthClient` is registered with `AllowAutoRedirect = false` and
 `UseCookies = false`. Turning either on makes *every* login fail with a plausible-looking
 upstream error. Guarded by `Tests/Extensions/ServiceRegistrationTests.cs`.
+
+### Unified authentication subsystem (`XAUAT.EduApi/Login/Unified/`)
+
+A **generic** CAS / 金智 UAAP login behind `POST /v1/login/unified`: the caller supplies only a
+protected target URL + credentials. The server follows the redirect chain to find the auth
+server (the login page URL carries `service=`, and that URL is what it later gets bounced back
+to), transparently forwards the page's `type="hidden"` inputs, encrypts the password with
+`pwdEncryptSalt` when present, POSTs **without following redirects** (the ticket only lives on
+that one 302), then walks the redirects back capturing `Set-Cookie` hop by hop. It reuses
+`XauatCookieJar` / `XauatHtmlParser` / `PasswordEncryptor` but shares no state with the XAUAT
+link — changing it cannot break `POST /v1/login`.
+
+Deliberately **no Redis**: every call really logs in, so cookies rotate; the
+`login-cookies-*` compatibility keys stay XAUAT-only.
+
+Two guards make an arbitrary-URL endpoint safe, and both fail silently if weakened:
+
+- `HostAllowList` — default `*.edu.cn`, extended (never replaced) by `UNIFIED_AUTH_ALLOWED_HOSTS`.
+- `UnifiedConnectGuard` on `ConnectCallback` — resolves DNS and drops private/reserved IPs *at
+  connect time*, so the check and the connection use the same address (a request-time check is
+  TOCTOU and loses to DNS rebinding). `UseProxy = false` belongs to the same defense: through a
+  proxy the callback never runs. Guarded by `Tests/Extensions/ServiceRegistrationTests.cs` and
+  `Tests/Login/Unified/`.
 
 ## New POI Data Import
 
