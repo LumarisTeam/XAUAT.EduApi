@@ -111,13 +111,15 @@ public static class ServiceCollectionExtensions
             services.AddSingleton<ILanguageResolver, HeaderLanguageResolver>();
             services.AddSingleton<IApiMessageLocalizer, ApiMessageLocalizer>();
             services.AddScoped<ICodeService, CodeService>();
-            services.AddScoped<ILoginService, SSOLoginService>();
+            // 原 SSOLoginService 走 schedule.xauat.site 代理（当前 502），改用直连统一认证
+            services.AddScoped<ILoginService, DirectSsoLoginService>();
             services.AddScoped<IExamService, ExamService>();
             services.AddScoped<IProgramService, ProgramService>();
             services.AddScoped<IInfoService, InfoService>();
             services.AddScoped<IPaymentService, PaymentService>();
             services.AddSingleton<IClassTimeService, ClassTimeService>();
             services.AddScoped<ICourseService, CourseService>();
+            services.AddScoped<IMicroCourseService, MicroCourseService>();
             services.AddScoped<IScoreService, ScoreService>();
             services.AddScoped<IBusService, BusService>();
             services.AddScoped<IRedisService, RedisService>();
