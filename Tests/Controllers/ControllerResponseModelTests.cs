@@ -303,6 +303,32 @@ public class ControllerResponseModelTests
         Assert.Equal("远端失败", payload.message);
     }
 
+    [Fact]
+    public async Task PaymentController_GetQrCode_ShouldReturnPayloadWithoutCaching()
+    {
+        var paymentService = new Mock<IPaymentService>();
+        paymentService.Setup(x => x.GetQrCodePayloadAsync("123456", It.IsAny<string>()))
+            .ReturnsAsync("payload-123");
+
+        var controller = new PaymentController(
+            paymentService.Object,
+            Mock.Of<ILogger<PaymentController>>(),
+            LanguageResolver,
+            MessageLocalizer)
+        {
+            ControllerContext = BuildControllerContext("test-cookie")
+        };
+
+        var result = await controller.GetQrCode("123456");
+
+        // 只返回支付码原文，二维码渲染由客户端负责
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var payloadProperty = ok.Value!.GetType().GetProperty("payload");
+        Assert.Equal("payload-123", payloadProperty!.GetValue(ok.Value));
+        // 支付码有时效，响应不能让任何中间层缓存
+        Assert.Equal("no-store", controller.Response.Headers.CacheControl.ToString());
+    }
+
     [Theory]
     [InlineData("fr", "Service temporairement indisponible.")]
     [InlineData("en", "Service temporarily unavailable.")]

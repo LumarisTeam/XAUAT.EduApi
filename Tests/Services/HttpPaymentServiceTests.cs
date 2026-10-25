@@ -125,6 +125,50 @@ public class HttpPaymentServiceTests
         Assert.Equal("/payment/20239999/turnover?password=202411", path);
     }
 
+    [Fact]
+    public async Task GetQrCodePayload_ShouldRequestQrCodePath()
+    {
+        string? path = null;
+        var service = CreateService(HttpStatusCode.OK, """{"payload":"payload-123"}""",
+            onRequest: request => path = request.RequestUri?.PathAndQuery);
+
+        await service.GetQrCodePayloadAsync("20239999", "202411");
+
+        Assert.Equal("/payment/20239999/qrcode?password=202411", path);
+    }
+
+    [Fact]
+    public async Task GetQrCodePayload_ShouldMapPayload_FromCamelCaseResponse()
+    {
+        var service = CreateService(HttpStatusCode.OK, """{"payload":"payload-123"}""");
+
+        var payload = await service.GetQrCodePayloadAsync("20239999");
+
+        Assert.Equal("payload-123", payload);
+    }
+
+    [Fact]
+    public async Task GetQrCodePayload_ShouldPreserveUpstreamMessage_WhenServiceUnavailable()
+    {
+        var service = CreateService(HttpStatusCode.ServiceUnavailable, "获取支付码失败: 上游超时", "text/plain");
+
+        var ex = await Assert.ThrowsAsync<PaymentServiceException>(
+            () => service.GetQrCodePayloadAsync("20239999"));
+
+        Assert.Equal("获取支付码失败: 上游超时", ex.Message);
+    }
+
+    [Fact]
+    public async Task GetQrCodePayload_ShouldThrowNonPaymentServiceException_WhenUnexpectedStatus()
+    {
+        var service = CreateService(HttpStatusCode.InternalServerError, "boom");
+
+        var ex = await Assert.ThrowsAnyAsync<Exception>(
+            () => service.GetQrCodePayloadAsync("20239999"));
+
+        Assert.IsNotType<PaymentServiceException>(ex);
+    }
+
     private static HttpPaymentService CreateService(HttpStatusCode statusCode, string body,
         string contentType = "application/json", Action<HttpRequestMessage>? onRequest = null)
     {

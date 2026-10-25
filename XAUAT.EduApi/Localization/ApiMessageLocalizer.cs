@@ -131,6 +131,15 @@ public class ApiMessageLocalizer : IApiMessageLocalizer
                 french: "Une erreur inconnue s'est produite lors de la récupération des opérations.",
                 japanese: "利用明細の取得中に不明なエラーが発生しました。",
                 korean: "사용 내역을 가져오는 중 알 수 없는 오류가 발생했습니다."),
+            [ApiMessageKey.PaymentQrCodeUnknownError] = CreateLocalizedMessage(
+                simplifiedChinese: "获取支付码过程中发生未知错误",
+                traditionalChinese: "取得支付碼過程中發生未知錯誤",
+                english: "An unknown error occurred while getting the payment code.",
+                german: "Beim Abrufen des Zahlungscodes ist ein unbekannter Fehler aufgetreten.",
+                russian: "При получении кода оплаты произошла неизвестная ошибка.",
+                french: "Une erreur inconnue s'est produite lors de la récupération du code de paiement.",
+                japanese: "支払いコードの取得中に不明なエラーが発生しました。",
+                korean: "결제 코드를 가져오는 중 알 수 없는 오류가 발생했습니다."),
             [ApiMessageKey.AccountBanned] = CreateLocalizedMessage(
                 simplifiedChinese: "账户已被暂时封禁，请稍后重试或联系管理员",
                 traditionalChinese: "帳戶已被暫時封禁，請稍後重試或聯絡管理員",

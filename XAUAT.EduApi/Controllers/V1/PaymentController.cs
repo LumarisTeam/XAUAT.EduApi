@@ -86,4 +86,50 @@ public class PaymentController(
                 ErrorResponse(ApiCodes.InternalError, Message(ApiMessageKey.PaymentTurnoverUnknownError)));
         }
     }
+
+    /// <summary>
+    /// 获取校园卡离线支付码原文。
+    /// </summary>
+    /// <remarks>
+    /// 只返回支付码内容，二维码由客户端自行渲染（避免服务端引入图像编码依赖）。
+    /// 支付码有时效，因此响应带 <c>Cache-Control: no-store</c>，客户端需按约定节奏重新获取。
+    /// </remarks>
+    /// <param name="id">校园卡号。</param>
+    /// <param name="password">密码。</param>
+    /// <response code="200">支付码原文</response>
+    /// <response code="500">服务器内部错误</response>
+    /// <response code="503">校园卡上游失败</response>
+    [HttpGet("{id}/qrcode")]
+    [ProducesResponseType(typeof(ApiResponse<string>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status500InternalServerError)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> GetQrCode(string id, [FromQuery] string password = "202411")
+    {
+        if (string.IsNullOrEmpty(password))
+        {
+            password = "202411";
+        }
+
+        try
+        {
+            logger.LogInformation("Get payment QR code with card number {id}", id);
+            var payload = await paymentService.GetQrCodePayloadAsync(id, password);
+
+            // 离线支付码有时效，任何中间层都不得缓存
+            Response.Headers.CacheControl = "no-store";
+            return Ok(SuccessResponse(payload));
+        }
+        catch (PaymentServiceException ex)
+        {
+            logger.LogError(ex, "Payment service error during fetching QR code for card {id}", id);
+            return StatusCode(StatusCodes.Status503ServiceUnavailable,
+                ErrorResponse(ApiCodes.UpstreamError, ex.Message));
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Unexpected error during fetching QR code for card {id}", id);
+            return StatusCode(StatusCodes.Status500InternalServerError,
+                ErrorResponse(ApiCodes.InternalError, Message(ApiMessageKey.PaymentQrCodeUnknownError)));
+        }
+    }
 }

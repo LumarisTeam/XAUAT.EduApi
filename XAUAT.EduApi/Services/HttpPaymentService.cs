@@ -37,7 +37,8 @@ public class HttpPaymentService(HttpClient httpClient, ILogger<HttpPaymentServic
     /// </remarks>
     public async Task<string> Login(string cardNum, string password = "202411", string language = "zh")
     {
-        var body = await SendAsync(TokenPath(cardNum, password), "登录失败");
+        using var response = await SendAsync(TokenPath(cardNum, password), "登录失败");
+        var body = await response.Content.ReadAsStringAsync();
 
         return JsonSerializer.Deserialize<PaymentTokenResponse>(body, JsonOptions)?.Token ?? "";
     }
@@ -45,7 +46,8 @@ public class HttpPaymentService(HttpClient httpClient, ILogger<HttpPaymentServic
     /// <inheritdoc cref="Login"/>
     public async Task<PaymentData> GetTurnoverAsync(string cardNum, string password = "202411", string language = "zh")
     {
-        var body = await SendAsync(TurnoverPath(cardNum, password), "获取消费记录失败");
+        using var response = await SendAsync(TurnoverPath(cardNum, password), "获取消费记录失败");
+        var body = await response.Content.ReadAsStringAsync();
 
         var result = JsonSerializer.Deserialize<PaymentTurnoverResult>(body, JsonOptions);
 
@@ -57,13 +59,31 @@ public class HttpPaymentService(HttpClient httpClient, ILogger<HttpPaymentServic
         };
     }
 
+    /// <remarks>
+    /// 没有 <c>language</c> 参数——支付码原文不含本地化文案，渲染发生在客户端。
+    /// </remarks>
+    public async Task<string> GetQrCodePayloadAsync(string cardNum, string password = "202411")
+    {
+        using var response = await SendAsync(QrCodePath(cardNum, password), "获取支付码失败");
+        var body = await response.Content.ReadAsStringAsync();
+
+        return JsonSerializer.Deserialize<PaymentQrCodeResponse>(body, JsonOptions)?.Payload ?? "";
+    }
+
     private static string TokenPath(string cardNum, string password)
         => $"payment/{Uri.EscapeDataString(cardNum)}/token?password={Uri.EscapeDataString(password)}";
 
     private static string TurnoverPath(string cardNum, string password)
         => $"payment/{Uri.EscapeDataString(cardNum)}/turnover?password={Uri.EscapeDataString(password)}";
 
-    private async Task<string> SendAsync(string path, string errorPrefix)
+    private static string QrCodePath(string cardNum, string password)
+        => $"payment/{Uri.EscapeDataString(cardNum)}/qrcode?password={Uri.EscapeDataString(password)}";
+
+    /// <summary>
+    /// 发起请求并把 HTTP 状态映射为 EduApi 的异常契约。
+    /// </summary>
+    /// <returns>成功时的响应；调用方负责 <c>using</c> 释放。</returns>
+    private async Task<HttpResponseMessage> SendAsync(string path, string errorPrefix)
     {
         HttpResponseMessage response;
         try
@@ -75,25 +95,29 @@ public class HttpPaymentService(HttpClient httpClient, ILogger<HttpPaymentServic
             throw new PaymentServiceException($"{errorPrefix}: {ex.Message}", ex);
         }
 
-        using (response)
+        if (response.StatusCode == HttpStatusCode.ServiceUnavailable)
         {
-            var body = await response.Content.ReadAsStringAsync();
-
-            if (response.StatusCode == HttpStatusCode.ServiceUnavailable)
+            using (response)
             {
+                var body = await response.Content.ReadAsStringAsync();
+
                 // 503 的 body 就是上游原始消息（纯文本，没有再包一层 JSON）
                 throw new PaymentServiceException(
                     string.IsNullOrWhiteSpace(body) ? $"{errorPrefix}: 上游返回 503" : body.Trim());
             }
+        }
 
-            if (!response.IsSuccessStatusCode)
+        if (!response.IsSuccessStatusCode)
+        {
+            using (response)
             {
+                var body = await response.Content.ReadAsStringAsync();
                 logger.LogError("PaymentAPI 返回 {StatusCode}: {Body}", (int)response.StatusCode, body);
                 throw new InvalidOperationException($"PaymentAPI 返回 {(int)response.StatusCode}");
             }
-
-            return body;
         }
+
+        return response;
     }
 }
 
@@ -102,3 +126,8 @@ public class HttpPaymentService(HttpClient httpClient, ILogger<HttpPaymentServic
 /// 跨服务边界刻意各自持有 DTO 副本，不共享编译期模型。
 /// </summary>
 internal sealed record PaymentTokenResponse(string Token);
+
+/// <summary>
+/// PaymentAPI <c>/payment/{cardNum}/qrcode</c> 的响应。
+/// </summary>
+internal sealed record PaymentQrCodeResponse(string Payload);
