@@ -2,6 +2,8 @@ using EduApi.Data;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NpgsqlDataProtection;
 using StackExchange.Redis;
@@ -243,17 +245,33 @@ public static class ServiceCollectionExtensions
                     client.DefaultRequestHeaders.TryAddWithoutValidation("Accept-Language", XauatConstants.AcceptLanguage);
                     client.DefaultRequestHeaders.TryAddWithoutValidation("Upgrade-Insecure-Requests", "1");
                 })
-                .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+                // 严格传输外面套一层"协议回退"：严格解析器遇到畸形响应头会直接抛
+                // （典型：gmis.xauat.edu.cn 每条响应都带 'SELINUX=Server'），
+                // 这种失败发生在任何 handler 拿到响应之前、也无法用配置放宽，
+                // 因此由 ProtocolFallbackHandler 把请求重放到容错传输。见 Login/Unified/。
+                .ConfigurePrimaryHttpMessageHandler(services =>
                 {
-                    // 同 XauatAuthClient：重定向与 cookie 都由调用方手工管理（见 UnifiedSsoClient）
-                    AllowAutoRedirect = false,
-                    UseCookies = false,
-                    // 走代理时 TCP 连接由代理建立，ConnectCallback 里的地址校验就形同虚设，
-                    // 而那道校验正是防 SSRF 的第二道闸——因此这里必须显式关掉代理。
-                    UseProxy = false,
-                    AutomaticDecompression = DecompressionMethods.All,
-                    PooledConnectionLifetime = TimeSpan.FromMinutes(5),
-                    ConnectCallback = UnifiedConnectGuard.ConnectAsync
+                    var loggers = services.GetService<ILoggerFactory>();
+
+                    return new ProtocolFallbackHandler(
+                        new SocketsHttpHandler
+                        {
+                            // 同 XauatAuthClient：重定向与 cookie 都由调用方手工管理（见 UnifiedSsoClient）
+                            AllowAutoRedirect = false,
+                            UseCookies = false,
+                            // 走代理时 TCP 连接由代理建立，ConnectCallback 里的地址校验就形同虚设，
+                            // 而那道校验正是防 SSRF 的第二道闸——因此这里必须显式关掉代理。
+                            UseProxy = false,
+                            AutomaticDecompression = DecompressionMethods.All,
+                            PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+                            ConnectCallback = UnifiedConnectGuard.ConnectAsync
+                        },
+                        // 容错通道自己解压、自己建连（复用 UnifiedConnectGuard 与系统证书校验）
+                        new TolerantHttpMessageHandler(
+                            loggers?.CreateLogger<TolerantHttpMessageHandler>()
+                            ?? NullLogger<TolerantHttpMessageHandler>.Instance),
+                        loggers?.CreateLogger<ProtocolFallbackHandler>()
+                        ?? NullLogger<ProtocolFallbackHandler>.Instance);
                 });
 
             services.AddSingleton<IUnifiedSsoClient, UnifiedSsoClient>();

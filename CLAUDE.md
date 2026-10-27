@@ -203,6 +203,18 @@ Two guards make an arbitrary-URL endpoint safe, and both fail silently if weaken
   proxy the callback never runs. Guarded by `Tests/Extensions/ServiceRegistrationTests.cs` and
   `Tests/Login/Unified/`.
 
+**`ProtocolFallbackHandler` is the deliberate second transport, and it must stay a fallback.**
+`SocketsHttpHandler` validates response header names against RFC 9110 tokens and throws
+`HttpRequestError.InvalidResponse` before any handler sees the response — no setting relaxes it.
+Real counter-example: `gmis.xauat.edu.cn` sends `SELINUX=Server:  ` on *every* response (name
+contains `=`, so browsers silently drop it and the school never notices), which made
+`/v1/login/unified` report "网络连接错误" for a perfectly reachable host. The fallback fires
+**only** on `InvalidResponse` / `ResponseEnded`; connection, TLS and timeout errors must not
+retry, or every real outage logs two different exceptions. `TolerantHttpMessageHandler` reuses
+`UnifiedConnectGuard.ConnectAsync(host, port, ct)` and the system certificate chain — it must never
+grow a "trust any certificate" switch or its own DNS check. Do not promote it to the primary
+transport.
+
 ## New POI Data Import
 
 When adding campus map POI data:

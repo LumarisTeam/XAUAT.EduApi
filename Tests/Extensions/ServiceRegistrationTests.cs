@@ -153,6 +153,29 @@ public class ServiceRegistrationTests
         Assert.NotNull(sockets.ConnectCallback);
     }
 
+    /// <summary>
+    /// 严格传输外面必须挂着协议回退壳。
+    /// <para>
+    /// 现实反例：<c>gmis.xauat.edu.cn</c> 每条响应都带非法头名 <c>SELINUX=Server</c>，
+    /// <see cref="SocketsHttpHandler"/> 在解析响应头阶段就抛异常，且**无法用配置放宽**。
+    /// 少了这层壳，接口会把"上游协议违规"报成"网络连接错误，无法连接到目标站点"，
+    /// 排查方向直接被带偏。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void UnifiedAuthClient_ShouldWrapStrictTransportWithProtocolFallback()
+    {
+        using var provider = BuildFullProvider();
+        var handlerFactory = provider.GetRequiredService<IHttpMessageHandlerFactory>();
+
+        using var handler = handlerFactory.CreateHandler(UnifiedSsoClient.ClientName);
+
+        // CreateHandler 最外面还套着工厂自己的 LifetimeTracking 与日志 handler，
+        // 因此这里在整条链上找，而不是假定它一定是第一层
+        Assert.True(ContainsHandler<ProtocolFallbackHandler>(handler),
+            "通用认证客户端的严格传输外面必须挂着协议回退壳（gmis 的 'SELINUX=Server' 头）");
+    }
+
     [Fact]
     public void UnifiedAuthService_ShouldBeResolvable()
     {
@@ -296,6 +319,17 @@ public class ServiceRegistrationTests
     /// 而 <c>_innerHandler</c> 声明在 <see cref="DelegatingHandler"/> 上。
     /// </para>
     /// </summary>
+    /// <summary>整条 handler 链上是否存在某个类型（工厂会额外套 LifetimeTracking / 日志 handler）。</summary>
+    private static bool ContainsHandler<T>(HttpMessageHandler handler) where T : HttpMessageHandler
+    {
+        for (HttpMessageHandler? current = handler; current is not null; current = FindInner(current))
+        {
+            if (current is T) return true;
+        }
+
+        return false;
+    }
+
     private static HttpMessageHandler Unwrap(HttpMessageHandler handler)
     {
         while (FindInner(handler) is { } inner)

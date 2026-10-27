@@ -31,9 +31,18 @@ internal static class UnifiedConnectGuard
     /// </summary>
     public static async ValueTask<Stream> ConnectAsync(
         SocketsHttpConnectionContext context, CancellationToken cancellationToken)
-    {
-        var host = context.DnsEndPoint.Host;
+        => await ConnectAsync(context.DnsEndPoint.Host, context.DnsEndPoint.Port, cancellationToken);
 
+    /// <summary>
+    /// 与上面同一套"解析 → 过滤内网 → 逐个尝试建连"的逻辑，供**不走** <see cref="SocketsHttpHandler"/>
+    /// 的原始传输复用（见 <see cref="TolerantHttpMessageHandler"/>）。
+    /// <para>
+    /// 两条通道必须共用这一份实现：容错传输是"严格解析失败时的退路"，
+    /// 如果它自己另写一套地址校验，那条退路就成了绕过 SSRF 防线的旁路。
+    /// </para>
+    /// </summary>
+    public static async ValueTask<Stream> ConnectAsync(string host, int port, CancellationToken cancellationToken)
+    {
         IPAddress[] addresses;
         if (IPAddress.TryParse(host, out var literal))
         {
@@ -58,7 +67,7 @@ internal static class UnifiedConnectGuard
             var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
             try
             {
-                await socket.ConnectAsync(new IPEndPoint(address, context.DnsEndPoint.Port), cancellationToken);
+                await socket.ConnectAsync(new IPEndPoint(address, port), cancellationToken);
                 return new NetworkStream(socket, ownsSocket: true);
             }
             catch (OperationCanceledException)
