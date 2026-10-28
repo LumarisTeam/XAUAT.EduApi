@@ -88,22 +88,24 @@ public class PaymentController(
     }
 
     /// <summary>
-    /// 获取校园卡离线支付码原文。
+    /// 获取校园卡支付码内容。
     /// </summary>
     /// <remarks>
-    /// 只返回支付码内容，二维码由客户端自行渲染（避免服务端引入图像编码依赖）。
+    /// 返回 <c>payload</c>（二维码原始字节的 Base64）与 <c>mode</c>（offline/online），
+    /// 二维码由客户端自行渲染（避免服务端引入图像编码依赖）。
     /// 支付码有时效，因此响应带 <c>Cache-Control: no-store</c>，客户端需按约定节奏重新获取。
     /// </remarks>
     /// <param name="id">校园卡号。</param>
     /// <param name="password">密码。</param>
-    /// <response code="200">支付码原文</response>
+    /// <response code="200">支付码内容</response>
     /// <response code="500">服务器内部错误</response>
     /// <response code="503">校园卡上游失败</response>
     [HttpGet("{id}/qrcode")]
-    [ProducesResponseType(typeof(ApiResponse<string>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<PaymentQrCodeResult>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status500InternalServerError)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status503ServiceUnavailable)]
-    public async Task<IActionResult> GetQrCode(string id, [FromQuery] string password = "202411")
+    public async Task<ActionResult<ApiResponse<PaymentQrCodeResult>>> GetQrCode(
+        string id, [FromQuery] string password = "202411")
     {
         if (string.IsNullOrEmpty(password))
         {
@@ -113,11 +115,11 @@ public class PaymentController(
         try
         {
             logger.LogInformation("Get payment QR code with card number {id}", id);
-            var payload = await paymentService.GetQrCodePayloadAsync(id, password);
+            var qrCode = await paymentService.GetQrCodePayloadAsync(id, password);
 
             // 离线支付码有时效，任何中间层都不得缓存
             Response.Headers.CacheControl = "no-store";
-            return Ok(SuccessResponse(payload));
+            return Ok(SuccessResponse(qrCode));
         }
         catch (PaymentServiceException ex)
         {

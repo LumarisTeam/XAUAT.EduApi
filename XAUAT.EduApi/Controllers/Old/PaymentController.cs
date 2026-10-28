@@ -127,12 +127,12 @@ public class PaymentController(
     }
 
     /// <summary>
-    /// 获取校园卡离线支付码原文
-    /// 返回支付码内容，由客户端自行渲染二维码
+    /// 获取校园卡支付码内容
+    /// 返回 payload（二维码原始字节的 Base64）与 mode（offline/online），由客户端自行渲染二维码
     /// </summary>
     /// <param name="id">校园卡号</param>
     /// <param name="password">密码</param>
-    /// <returns>包含支付码原文的对象</returns>
+    /// <returns>包含支付码内容与模式的对象</returns>
     /// <response code="200">成功获取支付码</response>
     /// <response code="500">服务器内部错误</response>
     /// <response code="503">服务暂时不可用</response>
@@ -158,11 +158,11 @@ public class PaymentController(
         try
         {
             logger.LogInformation("Get payment QR code with card number {id}", id);
-            var payload = await paymentService.GetQrCodePayloadAsync(id, password);
+            var qrCode = await paymentService.GetQrCodePayloadAsync(id, password);
 
             // 离线支付码有时效，任何中间层都不得缓存
             Response.Headers.CacheControl = "no-store";
-            return Ok(new { payload });
+            return Ok(new { payload = qrCode.Payload, mode = qrCode.Mode });
         }
         catch (PaymentServiceException ex)
         {

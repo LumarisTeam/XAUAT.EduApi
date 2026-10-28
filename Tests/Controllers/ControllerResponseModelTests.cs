@@ -304,11 +304,15 @@ public class ControllerResponseModelTests
     }
 
     [Fact]
-    public async Task PaymentController_GetQrCode_ShouldReturnPayloadWithoutCaching()
+    public async Task PaymentController_GetQrCode_ShouldReturnPayloadAndModeWithoutCaching()
     {
         var paymentService = new Mock<IPaymentService>();
         paymentService.Setup(x => x.GetQrCodePayloadAsync("123456", It.IsAny<string>()))
-            .ReturnsAsync("payload-123");
+            .ReturnsAsync(new PaymentQrCodeResult
+            {
+                Payload = "cGF5bG9hZC0xMjM=",
+                Mode = PaymentQrCodeResult.OfflineMode
+            });
 
         var controller = new PaymentController(
             paymentService.Object,
@@ -321,11 +325,40 @@ public class ControllerResponseModelTests
 
         var result = await controller.GetQrCode("123456");
 
-        // 只返回支付码原文，二维码渲染由客户端负责
+        // 只返回支付码内容，二维码渲染由客户端负责
         var ok = Assert.IsType<OkObjectResult>(result);
-        var payloadProperty = ok.Value!.GetType().GetProperty("payload");
-        Assert.Equal("payload-123", payloadProperty!.GetValue(ok.Value));
+        Assert.Equal("cGF5bG9hZC0xMjM=", ok.Value!.GetType().GetProperty("payload")!.GetValue(ok.Value));
+        Assert.Equal("offline", ok.Value!.GetType().GetProperty("mode")!.GetValue(ok.Value));
         // 支付码有时效，响应不能让任何中间层缓存
+        Assert.Equal("no-store", controller.Response.Headers.CacheControl.ToString());
+    }
+
+    [Fact]
+    public async Task PaymentV1Controller_GetQrCode_ShouldReturnTypedPayloadAndMode()
+    {
+        var paymentService = new Mock<IPaymentService>();
+        paymentService.Setup(x => x.GetQrCodePayloadAsync("123456", It.IsAny<string>()))
+            .ReturnsAsync(new PaymentQrCodeResult
+            {
+                Payload = "cGF5bG9hZC0xMjM=",
+                Mode = PaymentQrCodeResult.OnlineMode
+            });
+
+        var controller = new XAUAT.EduApi.Controllers.V1.PaymentController(
+            paymentService.Object,
+            Mock.Of<ILogger<XAUAT.EduApi.Controllers.V1.PaymentController>>(),
+            LanguageResolver,
+            MessageLocalizer)
+        {
+            ControllerContext = BuildControllerContext("test-cookie")
+        };
+
+        var result = await controller.GetQrCode("123456");
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var response = Assert.IsType<ApiResponse<PaymentQrCodeResult>>(ok.Value);
+        Assert.Equal("cGF5bG9hZC0xMjM=", response.Data!.Payload);
+        Assert.Equal(PaymentQrCodeResult.OnlineMode, response.Data.Mode);
         Assert.Equal("no-store", controller.Response.Headers.CacheControl.ToString());
     }
 

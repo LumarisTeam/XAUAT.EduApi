@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using EduApi.Data.Models;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Moq.Protected;
@@ -129,7 +130,8 @@ public class HttpPaymentServiceTests
     public async Task GetQrCodePayload_ShouldRequestQrCodePath()
     {
         string? path = null;
-        var service = CreateService(HttpStatusCode.OK, """{"payload":"payload-123"}""",
+        var service = CreateService(HttpStatusCode.OK,
+            """{"payload":"cGF5bG9hZC0xMjM=","mode":"offline"}""",
             onRequest: request => path = request.RequestUri?.PathAndQuery);
 
         await service.GetQrCodePayloadAsync("20239999", "202411");
@@ -138,13 +140,25 @@ public class HttpPaymentServiceTests
     }
 
     [Fact]
-    public async Task GetQrCodePayload_ShouldMapPayload_FromCamelCaseResponse()
+    public async Task GetQrCodePayload_ShouldMapPayloadAndMode_FromCamelCaseResponse()
     {
-        var service = CreateService(HttpStatusCode.OK, """{"payload":"payload-123"}""");
+        var service = CreateService(HttpStatusCode.OK,
+            """{"payload":"cGF5bG9hZC0xMjM=","mode":"online"}""");
 
-        var payload = await service.GetQrCodePayloadAsync("20239999");
+        var result = await service.GetQrCodePayloadAsync("20239999");
 
-        Assert.Equal("payload-123", payload);
+        Assert.Equal("cGF5bG9hZC0xMjM=", result.Payload);
+        Assert.Equal(PaymentQrCodeResult.OnlineMode, result.Mode);
+    }
+
+    [Fact]
+    public async Task GetQrCodePayload_ShouldDefaultToOfflineMode_WhenModeMissing()
+    {
+        var service = CreateService(HttpStatusCode.OK, """{"payload":"cGF5bG9hZC0xMjM="}""");
+
+        var result = await service.GetQrCodePayloadAsync("20239999");
+
+        Assert.Equal(PaymentQrCodeResult.OfflineMode, result.Mode);
     }
 
     [Fact]

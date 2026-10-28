@@ -60,14 +60,20 @@ public class HttpPaymentService(HttpClient httpClient, ILogger<HttpPaymentServic
     }
 
     /// <remarks>
-    /// 没有 <c>language</c> 参数——支付码原文不含本地化文案，渲染发生在客户端。
+    /// 没有 <c>language</c> 参数——支付码内容不含本地化文案，渲染发生在客户端。
     /// </remarks>
-    public async Task<string> GetQrCodePayloadAsync(string cardNum, string password = "202411")
+    public async Task<PaymentQrCodeResult> GetQrCodePayloadAsync(string cardNum, string password = "202411")
     {
         using var response = await SendAsync(QrCodePath(cardNum, password), "获取支付码失败");
         var body = await response.Content.ReadAsStringAsync();
 
-        return JsonSerializer.Deserialize<PaymentQrCodeResponse>(body, JsonOptions)?.Payload ?? "";
+        var result = JsonSerializer.Deserialize<PaymentQrCodeResponse>(body, JsonOptions);
+
+        return new PaymentQrCodeResult
+        {
+            Payload = result?.Payload ?? "",
+            Mode = string.IsNullOrEmpty(result?.Mode) ? PaymentQrCodeResult.OfflineMode : result.Mode
+        };
     }
 
     private static string TokenPath(string cardNum, string password)
@@ -130,4 +136,4 @@ internal sealed record PaymentTokenResponse(string Token);
 /// <summary>
 /// PaymentAPI <c>/payment/{cardNum}/qrcode</c> 的响应。
 /// </summary>
-internal sealed record PaymentQrCodeResponse(string Payload);
+internal sealed record PaymentQrCodeResponse(string Payload, string Mode);
