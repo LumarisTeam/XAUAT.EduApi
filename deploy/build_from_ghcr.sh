@@ -19,7 +19,7 @@
 #
 # 用法：
 #   ./build_from_ghcr.sh
-#   ./build_from_ghcr.sh ccr.ccs.tencentyun.com/lumaris/xauat.eduapi:<commit-sha>   # 指定版本，也是回滚方式
+#   ./build_from_ghcr.sh ccr.ccs.tencentyun.com/lumaris_hk/xauat.eduapi:<commit-sha>   # 指定版本，也是回滚方式
 #   APP_PORT=9090 ./build_from_ghcr.sh
 #   IMAGE=... NETWORK_NAME=... COMPOSE_PROJECT_NAME=... ./build_from_ghcr.sh
 #   USE_GHCR=1 ./build_from_ghcr.sh       # 改从 ghcr.io 拉（国内一般拉不动）
@@ -49,7 +49,7 @@ SERVICE_NAME="app"
 if [[ "${USE_GHCR:-0}" == "1" ]]; then
   DEFAULT_IMAGE="ghcr.io/lumaristeam/xauat.eduapi:latest"
 else
-  DEFAULT_IMAGE="ccr.ccs.tencentyun.com/lumaris/xauat.eduapi:latest"
+  DEFAULT_IMAGE="ccr.ccs.tencentyun.com/lumaris_hk/xauat.eduapi:latest"
 fi
 IMAGE="${IMAGE:-${1:-$DEFAULT_IMAGE}}"
 

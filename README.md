@@ -93,7 +93,7 @@ chmod 600 .env
 ```bash
 cd /opt/xauat-eduapi/deploy
 ./build_from_ghcr.sh                                            # 拉 :latest
-./build_from_ghcr.sh ccr.ccs.tencentyun.com/lumaris/xauat.eduapi:<sha>   # 指定版本，也是回滚方式
+./build_from_ghcr.sh ccr.ccs.tencentyun.com/lumaris_hk/xauat.eduapi:<sha>   # 指定版本，也是回滚方式
 APP_PORT=9090 ./build_from_ghcr.sh                              # 改宿主机端口（默认 8080）
 ```
 
@@ -105,6 +105,10 @@ APP_PORT=9090 ./build_from_ghcr.sh                              # 改宿主机�
 CI 把同一批 tag 推**两份**：ghcr.io 作归档，腾讯云 TCR 供国内服务器拉取。
 服务器默认从 TCR 拉——ghcr 的镜像层走 `pkg-containers.githubusercontent.com`，
 在国内基本拉不动（命令能通、认证也能过，就是层下不来）。
+
+工作流从 GitHub Actions Variable `MIRROR_NAMESPACE` 读取 TCR 命名空间；当前命名空间为
+`lumaris_hk`。修改后也要在仓库或组织的 Settings → Secrets and variables → Actions → Variables
+中将 `MIRROR_NAMESPACE` 更新为 `lumaris_hk`，否则 CI 仍会推送到原 namespace。
 
 TCR 是私有仓库，服务器需要一组凭据：
 
