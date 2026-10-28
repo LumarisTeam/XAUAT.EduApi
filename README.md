@@ -93,7 +93,7 @@ chmod 600 .env
 ```bash
 cd /opt/xauat-eduapi/deploy
 ./build_from_ghcr.sh                                            # 拉 :latest
-./build_from_ghcr.sh ccr.ccs.tencentyun.com/lumaris_hk/xauat.eduapi:<sha>   # 指定版本，也是回滚方式
+./build_from_ghcr.sh hkccr.ccs.tencentyun.com/lumaris_hk/xauat.eduapi:<sha>   # 指定版本，也是回滚方式
 APP_PORT=9090 ./build_from_ghcr.sh                              # 改宿主机端口（默认 8080）
 ```
 
@@ -106,15 +106,22 @@ CI 把同一批 tag 推**两份**：ghcr.io 作归档，腾讯云 TCR 供国内�
 服务器默认从 TCR 拉——ghcr 的镜像层走 `pkg-containers.githubusercontent.com`，
 在国内基本拉不动（命令能通、认证也能过，就是层下不来）。
 
-工作流从 GitHub Actions Variable `MIRROR_NAMESPACE` 读取 TCR 命名空间；当前命名空间为
-`lumaris_hk`。修改后也要在仓库或组织的 Settings → Secrets and variables → Actions → Variables
-中将 `MIRROR_NAMESPACE` 更新为 `lumaris_hk`，否则 CI 仍会推送到原 namespace。
+工作流从两个 GitHub Actions Variable 读取镜像地址：`MIRROR_REGISTRY`（registry 域名）和
+`MIRROR_NAMESPACE`（TCR 命名空间）。当前值是 `hkccr.ccs.tencentyun.com` + `lumaris_hk`。
+两者都配了才会双推，缺一个就只推 ghcr。
+
+**地域决定域名，这是最容易踩的一脚。** 腾讯云 TCR 个人版按地域分成互不相通的实例，每个实例
+有自己的访问域名：中国大陆是 `ccr.ccs.tencentyun.com`，中国香港是 `hkccr.ccs.tencentyun.com`。
+命名空间只存在于它被创建的那个地域的实例里，拿国内域名去推香港的命名空间会被 TCR 回
+`denied: no permission! are you logined with another ccr account?`——这句提示看着像账号不对，
+实际是域名/实例不对。改命名空间时去 TCR 控制台的实例详情页抄「访问域名」，别手推。
 
 TCR 是私有仓库，服务器需要一组凭据：
 
-1. 腾讯云控制台 → 容器镜像服务 TCR → 个人版实例 → 实例管理 → **初始化密码**
-   （忘了就「更多 → 重置登录密码」）
-2. **用户名是当前登录的腾讯云账号 ID**
+1. 腾讯云控制台 → 容器镜像服务 TCR → **把地域切到镜像所在的那个**（香港）→ 个人版实例 →
+   实例管理 → **初始化密码**（忘了就「更多 → 重置登录密码」）。密码是**按实例**设的，国内实例的
+   那组凭据不一定能用在这个实例上。
+2. **用户名是当前登录的腾讯云账号 ID**（主账号 UIN，不是子账号、不是邮箱）
 3. 部署时传入：
 
 ```bash
@@ -122,7 +129,7 @@ PULL_TOKEN=<你设的固定密码> PULL_USERNAME=<腾讯云账号ID> ./build_fro
 ```
 
 脚本用完会 `docker logout <registry>`；不传这两个变量则沿用本机已有的 docker 凭据
-（即此前手动 `docker login ccr.ccs.tencentyun.com` 过）。
+（即此前手动 `docker login hkccr.ccs.tencentyun.com` 过）。
 
 要改用 ghcr 那份就加 `USE_GHCR=1`，凭据换成一张 GitHub classic PAT
 （**只勾 `read:packages`**——GitHub Packages 不支持 fine-grained token）：

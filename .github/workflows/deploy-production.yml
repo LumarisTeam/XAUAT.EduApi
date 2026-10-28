@@ -20,7 +20,9 @@ env:
   REGISTRY: ghcr.io
   # 国内镜像仓库：这两个 Variable 都配了才会双推，没配就只推 ghcr。
   # 配在 仓库/组织 → Settings → Secrets and variables → Actions → Variables。
-  # 本项目用腾讯云 TCR 个人版，所以 MIRROR_REGISTRY=ccr.ccs.tencentyun.com；
+  # 本项目用腾讯云 TCR 个人版的香港实例，所以 MIRROR_REGISTRY=hkccr.ccs.tencentyun.com
+  # （中国大陆实例是 ccr.ccs.tencentyun.com——两者互不相通，域名指错会报
+  # "no permission! are you logined with another ccr account?"）。
   # MIRROR_NAMESPACE 填 TCR 控制台里建的命名空间，仓库名沿用 $GITHUB_REPOSITORY 的末段。
   # 配套的 MIRROR_USERNAME / MIRROR_PASSWORD 两个 Secret：用户名是腾讯云账号 ID，
   # 密码是 TCR 实例管理里「初始化密码」设的固定密码。
@@ -114,9 +116,9 @@ jobs:
         timeout-minutes: 25
 
       # 第二遍构建的每个 RUN/COPY 都会命中上一步留在同一个 builder 容器里的本地缓存，
-      # 秒级完成；这一步真正的时间全花在把层推到 ccr.ccs.tencentyun.com 这段从 Azure
-      # 到国内的链路上（首次全量推送实测约 40 分钟）。40 分钟是"卡住就别再等"的上限，
-      # 基底层已经在 TCR 里时每次只推改动的应用层，远用不到。
+      # 秒级完成；这一步真正的时间全花在把层推到 hkccr.ccs.tencentyun.com 这段链路上
+      # （推国内实例时首次全量实测约 40 分钟，改走香港实例后快得多）。40 分钟仍作为
+      # "卡住就别再等"的上限保留；基底层已经在 TCR 里时每次只推改动的应用层，远用不到。
       - name: Push to mirror registry
         if: env.MIRROR_REGISTRY != '' && env.MIRROR_NAMESPACE != ''
         uses: docker/build-push-action@v6
