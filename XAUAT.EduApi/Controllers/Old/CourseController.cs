@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using XAUAT.EduApi.Extensions;
 using XAUAT.EduApi.Filters;
+using XAUAT.EduApi.Interfaces;
 using XAUAT.EduApi.Localization;
 using XAUAT.EduApi.Services;
 
@@ -21,6 +22,7 @@ namespace XAUAT.EduApi.Controllers.Old;
 public class CourseController(
     ILogger<CourseController> logger,
     ICourseService courseService,
+    IGraduateCourseService graduateCourseService,
     ILanguageResolver languageResolver,
     IApiMessageLocalizer messageLocalizer)
     : LanguageAwareControllerBase(languageResolver, messageLocalizer)
@@ -51,12 +53,26 @@ public class CourseController(
     [ProducesResponseType(typeof(CourseErrorResponse), StatusCodes.Status502BadGateway)]
     public async Task<ActionResult<CourseResultResponse>> GetCourse(string studentId)
     {
+        if (!Request.TryGetEduSystemMode(out var mode))
+        {
+            return BadRequest(new CourseErrorResponse
+            {
+                Success = false,
+                Message = Message(ApiMessageKey.InvalidLoginMode)
+            });
+        }
+
         try
         {
-            logger.LogInformation("开始获取课程信息");
-            var cookie = Request.GetEduAuthCookie();
+            logger.LogInformation("开始获取课程信息，系统类型 {Mode}", mode);
+            var cookie = mode == EduSystemMode.Graduate
+                ? Request.GetGraduateAuthCookie()
+                : Request.GetEduAuthCookie();
 
-            var courses = await courseService.GetCoursesAsync(studentId, cookie, Language);
+            var courses = mode == EduSystemMode.Graduate
+                ? await graduateCourseService.GetCoursesAsync(
+                    studentId, cookie, HttpContext.RequestAborted)
+                : await courseService.GetCoursesAsync(studentId, cookie, Language);
 
             // 返回处理后的课程数据
             return Ok(new CourseResultResponse

@@ -185,6 +185,16 @@ public class ServiceRegistrationTests
     }
 
     [Fact]
+    public void GraduateServices_ShouldBeResolvable()
+    {
+        // x-loginMode=1 的整条链路也走 DI：漏注册只会在请求时才 500
+        using var provider = BuildFullProvider();
+
+        Assert.IsType<GraduateLoginService>(provider.GetRequiredService<IGraduateLoginService>());
+        Assert.IsType<GraduateCourseService>(provider.GetRequiredService<IGraduateCourseService>());
+    }
+
+    [Fact]
     public void LoginAdminService_ShouldBeResolvable()
     {
         using var provider = BuildFullProvider();

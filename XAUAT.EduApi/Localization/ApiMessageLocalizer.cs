@@ -158,6 +158,15 @@ public class ApiMessageLocalizer : IApiMessageLocalizer
                 french: "Un jeton valide est requis pour les opérations de connexion.",
                 japanese: "ログイン運用操作には有効なトークンが必要です。",
                 korean: "로그인 운영 작업에는 유효한 토큰이 필요합니다."),
+            [ApiMessageKey.InvalidLoginMode] = CreateLocalizedMessage(
+                simplifiedChinese: "x-loginMode 取值无效，仅支持 0（本科生）或 1（研究生）",
+                traditionalChinese: "x-loginMode 取值無效，僅支援 0（大學生）或 1（研究生）",
+                english: "Invalid x-loginMode value. Only 0 (undergraduate) or 1 (graduate) are supported.",
+                german: "Ungültiger x-loginMode-Wert. Unterstützt werden nur 0 (Bachelor) oder 1 (Master).",
+                russian: "Недопустимое значение x-loginMode. Поддерживаются только 0 (бакалавриат) и 1 (магистратура).",
+                french: "Valeur x-loginMode invalide. Seules 0 (licence) et 1 (master) sont prises en charge.",
+                japanese: "x-loginMode の値が不正です。0（学部）または 1（大学院）のみ対応しています。",
+                korean: "x-loginMode 값이 올바르지 않습니다. 0(학부) 또는 1(대학원)만 지원합니다."),
             [ApiMessageKey.LoginOpsUsernameRequired] = CreateLocalizedMessage(
                 simplifiedChinese: "缺少用户名",
                 traditionalChinese: "缺少使用者名稱",

@@ -1,6 +1,7 @@
 using EduApi.Data.Models;
 using Microsoft.AspNetCore.Mvc;
 using XAUAT.EduApi.Exceptions;
+using XAUAT.EduApi.Extensions;
 using XAUAT.EduApi.Interfaces;
 using XAUAT.EduApi.Localization;
 
@@ -16,6 +17,7 @@ namespace XAUAT.EduApi.Controllers.Old;
 [Consumes("application/json")]
 public class LoginController(
     ILoginService loginService,
+    IGraduateLoginService graduateLoginService,
     ILogger<LoginController> logger,
     ILanguageResolver languageResolver,
     IApiMessageLocalizer messageLocalizer)
@@ -55,7 +57,16 @@ public class LoginController(
                 return BadRequest(Message(ApiMessageKey.UsernameOrPasswordRequired));
             }
 
-            var result = await loginService.LoginAsync(request.Username, request.Password, Language);
+            if (!Request.TryGetEduSystemMode(out var mode))
+            {
+                return BadRequest(Message(ApiMessageKey.InvalidLoginMode));
+            }
+
+            var result = mode == EduSystemMode.Graduate
+                ? await graduateLoginService.LoginAsync(
+                    request.Username, request.Password, HttpContext.RequestAborted)
+                : await loginService.LoginAsync(request.Username, request.Password, Language);
+
             return Ok(result);
         }
         catch (LoginFailedException)
@@ -71,6 +82,11 @@ public class LoginController(
             logger.LogWarning("用户 {Username} 已被登录服务封禁，理由 {Reason}，解封时刻 {UnbanAt}",
                 request.Username, ex.Reason, ex.UnbanAt);
             return RateLimited(ApiMessageKey.AccountBanned, ex.RetryAfterSeconds);
+        }
+        catch (HttpRequestException ex)
+        {
+            logger.LogError(ex, "用户 {Username} 登录时上游不可达", request.Username);
+            return StatusCode(502, Message(ApiMessageKey.EduSystemAccessFailed));
         }
         catch (Exception ex)
         {

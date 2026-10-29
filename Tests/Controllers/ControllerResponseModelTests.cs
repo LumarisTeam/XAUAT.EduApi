@@ -37,9 +37,14 @@ public class ControllerResponseModelTests
 
         var controller = new LoginController(
             loginService.Object,
+            Mock.Of<IGraduateLoginService>(),
             Mock.Of<ILogger<LoginController>>(),
             LanguageResolver,
-            MessageLocalizer);
+            MessageLocalizer)
+        {
+            // 控制器现在会读 x-loginMode 请求头，没有 HttpContext 会直接空引用
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+        };
 
         var result = await controller.Login(new LoginRequest
         {
@@ -70,6 +75,7 @@ public class ControllerResponseModelTests
         var controller = new CourseController(
             Mock.Of<ILogger<CourseController>>(),
             courseService.Object,
+            Mock.Of<IGraduateCourseService>(),
             LanguageResolver,
             MessageLocalizer)
         {
@@ -99,6 +105,7 @@ public class ControllerResponseModelTests
         var controller = new CourseController(
             Mock.Of<ILogger<CourseController>>(),
             courseService.Object,
+            Mock.Of<IGraduateCourseService>(),
             LanguageResolver,
             MessageLocalizer)
         {
@@ -137,6 +144,7 @@ public class ControllerResponseModelTests
         var controller = new CourseController(
             Mock.Of<ILogger<CourseController>>(),
             courseService.Object,
+            Mock.Of<IGraduateCourseService>(),
             LanguageResolver,
             MessageLocalizer)
         {
@@ -209,6 +217,7 @@ public class ControllerResponseModelTests
         var controller = new CourseController(
             Mock.Of<ILogger<CourseController>>(),
             courseService.Object,
+            Mock.Of<IGraduateCourseService>(),
             LanguageResolver,
             MessageLocalizer)
         {
@@ -233,6 +242,7 @@ public class ControllerResponseModelTests
         var controller = new CourseController(
             Mock.Of<ILogger<CourseController>>(),
             courseService.Object,
+            Mock.Of<IGraduateCourseService>(),
             LanguageResolver,
             MessageLocalizer)
         {
@@ -265,6 +275,7 @@ public class ControllerResponseModelTests
         var controller = new CourseController(
             Mock.Of<ILogger<CourseController>>(),
             courseService.Object,
+            Mock.Of<IGraduateCourseService>(),
             LanguageResolver,
             MessageLocalizer)
         {

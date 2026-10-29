@@ -21,6 +21,9 @@ public static class ApiMessageKey
     public const string LoginOpsTokenRequired = nameof(LoginOpsTokenRequired);
     public const string LoginOpsUsernameRequired = nameof(LoginOpsUsernameRequired);
 
+    // 系统类型头（x-loginMode）
+    public const string InvalidLoginMode = nameof(InvalidLoginMode);
+
     // 通用统一身份认证（/v1/login/unified）
     public const string UnifiedAuthParamRequired = nameof(UnifiedAuthParamRequired);
     public const string UnifiedAuthInvalidTarget = nameof(UnifiedAuthInvalidTarget);

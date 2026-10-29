@@ -150,6 +150,8 @@ public static class ServiceCollectionExtensions
             });
             services.AddSingleton<IClassTimeService, ClassTimeService>();
             services.AddScoped<ICourseService, CourseService>();
+            // 研究生课表：只在 x-loginMode=1 时由控制器选中，不参与本科生链路
+            services.AddScoped<IGraduateCourseService, GraduateCourseService>();
             // 日历订阅：课程/考试数据复用上面的 CourseService/ExamService，
             // 只有 ICS 组装是本服务自己的（见 Services/CalendarService.cs）
             services.AddScoped<ICalendarService, CalendarService>();
@@ -229,6 +231,10 @@ public static class ServiceCollectionExtensions
             // Production 下静默捕获它直到进程结束。EduApi 其余业务服务同为 Scoped。
             services.AddScoped<ILoginService, SsoLoginService>();
             services.AddScoped<ILoginAdminService, LocalLoginAdminService>();
+
+            // 研究生登录：目标地址固定为 gmis 的 SSO 入口，底层复用通用统一认证。
+            // 它**刻意不接**登录子系统那套 Redis 缓存/封禁键（见 GraduateLoginService）。
+            services.AddScoped<IGraduateLoginService, GraduateLoginService>();
 
             // ---- 通用统一身份认证（/v1/login/unified，见 Login/Unified/）
             // 与上面的 XAUAT 专用客户端**刻意分成两个命名客户端**：通用客户端要额外挂

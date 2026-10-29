@@ -40,6 +40,7 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi(options =>
 {
     options.AddOperationTransformer<LanguageHeaderOperationTransformer>();
+    options.AddOperationTransformer<LoginModeHeaderOperationTransformer>();
 });
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton(

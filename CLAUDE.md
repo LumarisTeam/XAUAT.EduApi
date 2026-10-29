@@ -53,10 +53,10 @@ dotnet run -c Release --project Tests/XAUAT.EduApi.Tests.csproj -- --filter "*Pe
 
 | Controller | Purpose |
 |------------|---------|
-| `LoginController` | SSO login. Does the CAS/UAAP handshake itself, returns cookies for subsequent requests |
+| `LoginController` | SSO login. Does the CAS/UAAP handshake itself, returns cookies for subsequent requests. `x-loginMode: 1` → graduate login (see below) |
 | `UnifiedAuthController` | Generic unified auth (`v1/login/unified`). One target URL + credentials → discovers the CAS login page, logs in, returns the cookies. Host allow list + private-address guard; no Redis |
 | `LoginOpsController` | Login ops (`v1/login-ops`): active user count, ban logs, ban status, unban. Reads the shared Redis directly; requires `MAP_ADMIN_TOKEN` |
-| `CourseController` | Course schedules, campus timetable (`ScheduleTime`) |
+| `CourseController` | Course schedules, campus timetable (`ScheduleTime`). `x-loginMode: 1` → graduate timetable (see below) |
 | `CalendarController` | ICS calendar subscription (`v1/course/Calendar`) |
 | `ScoreController` | Exam scores |
 | `ExamController` | Exam arrangements |
@@ -214,6 +214,49 @@ retry, or every real outage logs two different exceptions. `TolerantHttpMessageH
 `UnifiedConnectGuard.ConnectAsync(host, port, ct)` and the system certificate chain — it must never
 grow a "trust any certificate" switch or its own DNS check. Do not promote it to the primary
 transport.
+
+### 研究生教务系统（`x-loginMode: 1`）
+
+研究生系统（`gmis.xauat.edu.cn`，参考实现见仓库外的 `py_src/`）只覆盖**登录**与**课表**；
+校车、电费、饭卡、地图等非教务接口对两个系统是通用的，不读这个头。
+
+通用头契约（`LoginModeExtensions`）：
+
+| `x-loginMode` | 含义 |
+|---|---|
+| 缺失 / 空 / `0` | 本科生系统（默认，`swjw.xauat.edu.cn`） |
+| `1` | 研究生系统（`gmis.xauat.edu.cn`） |
+| 其它 | 400 `10001`（`ApiMessageKey.InvalidLoginMode`），**不**静默回落到本科生 |
+
+只有 `POST /v1/login`（旧路由 `/Login`）与 `GET /v1/course`（旧路由 `/Course`）读取它；
+OpenAPI 文档由 `LoginModeHeaderOperationTransformer` 只给这两个控制器补参数
+（`/v1/course/ScheduleTime` 是通用作息表，刻意排除）。
+
+- **登录**：`GraduateLoginService` 把目标地址固定为
+  `https://gmis.xauat.edu.cn/pyxx/sso/login`，直接复用 `IUnifiedAuthService`
+  （`Login/Unified/`）完成发现/CAS 登录/回跳。与本科生链路的三处刻意差异：
+  **不接 Redis**（通用认证每次都会真登录、cookie 会轮换，`login-cookies-*` 是本科生兼容键）、
+  **不做封禁/登录限流**、**学号直接取用户名**（研究生登录页不返回学号）。
+  凭据错 → `LoginFailedException`（401）；目标地址被通用认证层拒绝或上游不可达 →
+  `HttpRequestException`（502）。
+- **课表**：`GraduateCourseService` 带 cookie GET
+  `https://gmis.xauat.edu.cn/pyxx/pygl/xskbcx`，由 `GraduateTimetableParser`
+  解析成与本科同构的 `List<CourseActivity>`（页面是
+  `var td = document.getElementById("td_星期_节次"); td.innerHTML += "…"` 的 JS 片段，
+  不是 `<table>`）。缓存键必须是 `CacheKeys.GraduateCourses(studentId)`，**不能**与
+  `CacheKeys.Courses` 共用——同一学号在两个系统是两份课表，共用键不会报错，只会串数据。
+- **Cookie 提取**：用 `Request.GetGraduateAuthCookie()`，不是 `GetEduAuthCookie()`。
+  研究生 cookie 没有 `__pstsid__` 特征，后者会把它当成非教务 cookie 丢掉。
+- **传输层**：必须复用命名客户端 `UnifiedSsoClient.ClientName`（`UnifiedAuthClient`）。
+  `gmis` 每条响应都带非法头名 `SELINUX=Server`，普通 `SocketsHttpHandler` 在解析响应头时
+  就会抛 `InvalidResponse`；该客户端已挂 `ProtocolFallbackHandler`，且关掉了自动重定向
+  （cookie 失效时的 302 就是我们的 401 判定依据）。
+- **字符集**：`gmis` 的 `Content-Type` 不带 charset，`GraduateHtmlDecoder` 按
+  Content-Type → `<meta charset>` → UTF-8 合法性 → GB18030 的顺序解码。若按 UTF-8
+  硬解 GBK 页面，中文会静默乱码、正则匹配不到课程，表现为"登录成功但课表为空"。
+
+`py_src/` 只是移植参考，不是运行时依赖；改动解析规则时请同步核对
+`python3 -c "..."` 的原始输出。
 
 ## New POI Data Import
 

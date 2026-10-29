@@ -319,6 +319,16 @@ public static class CacheKeys
         => $"{Prefix}:courses:{SafeEncode(studentId)}";
 
     /// <summary>
+    /// 生成研究生课程缓存键。
+    /// <para>
+    /// <b>必须与 <see cref="Courses"/> 分开</b>：同一个学号在本科生/研究生两个系统里
+    /// 是两份不同的课表，共用键会让两种模式互相覆盖——而且不会报错，只会返回错系统数据。
+    /// </para>
+    /// </summary>
+    public static string GraduateCourses(string studentId)
+        => $"{Prefix}:graduate_courses:{SafeEncode(studentId)}";
+
+    /// <summary>
     /// 生成电费余额缓存键
     /// </summary>
     public static string ElectricityBalance(string sourceUrl)
