@@ -6,7 +6,7 @@ namespace XAUAT.EduApi.Services;
 /// <summary>
 /// 研究生教务系统课表页（<c>https://gmis.xauat.edu.cn/pyxx/pygl/xskbcx</c>）的解析器。
 /// <para>
-/// 逐条移植自 <c>py_src/parse_html.py</c>。页面的数据不是 <c>&lt;table&gt;</c> 标签，
+/// 逐条移植自仓库外的 <c>src/parse_html.py</c>。页面的数据不是 <c>&lt;table&gt;</c> 标签，
 /// 而是一段段 <c>var td = document.getElementById("td_星期_节次"); td.innerHTML += "..."</c>
 /// 的 JS —— 所以只能用正则按"单元格赋值"切块，再把块内每个 <c>innerHTML +=</c>
 /// 当作一门课的一次安排。
@@ -75,6 +75,11 @@ internal static class GraduateTimetableParser
     /// <summary>教室字段末尾的周次范围：<c>(第1-16周)</c> / <c>(第2-8周,双周)</c>。</summary>
     private static readonly Regex WeekRangePattern = new(
         """\(\s*第\s*(\d+)\s*-\s*(\d+)\s*周\s*([^)]*)\)""",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    /// <summary>教室字段最后一段是不是"纯房间号"，如 <c>208</c>、<c>106</c>、<c>208A</c>。</summary>
+    private static readonly Regex RoomNumberPattern = new(
+        """^\d+[A-Za-z]?$""",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     /// <summary>
@@ -228,13 +233,37 @@ internal static class GraduateTimetableParser
         => value.Replace("\\\"", "\"").Replace("\\\\", "\\");
 
     /// <summary>
-    /// <c>草堂校区-南山书院-南山书院303</c> → (草堂校区, 南山书院303)。
-    /// 只取第一段作校区、最后一段作教室；没有分隔符时原样两边都给（与 Python 版一致）。
+    /// <c>草堂校区-南山书院-南山书院303</c> → (草堂校区, 南山书院303)；
+    /// <c>草堂校区-草堂校区9号楼-草堂9-208</c> → (草堂校区, 草堂9-208)。
+    /// <para>
+    /// 第一段是校区、最后一段是教室。<b>最后一段是纯房间号时要拼回上一段</b>：
+    /// 这种格式下教务把楼栋简称切进了倒数第二段（<c>草堂9</c> + <c>208</c>），
+    /// 只取最后一段会丢掉楼栋，两个不同楼的同名房间就分不开了。
+    /// </para>
+    /// <para>
+    /// 没有分隔符时只认作校区、教室留空（调用方会兜底成"未知"），与 Python 版一致。
+    /// </para>
     /// </summary>
     private static (string Campus, string Room) SplitRoom(string classroom)
     {
         var parts = classroom.Split('-', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        return parts.Length == 0 ? ("", "") : (parts[0], parts[^1]);
+        if (parts.Length == 0)
+        {
+            return ("", "");
+        }
+
+        var campus = parts[0];
+        if (parts.Length == 1)
+        {
+            return (campus, "");
+        }
+
+        var last = parts[^1];
+        var room = parts.Length >= 3 && RoomNumberPattern.IsMatch(last)
+            ? $"{parts[^2]}-{last}"
+            : last;
+
+        return (campus, room);
     }
 
     private static List<int> ExpandWeeks(int? start, int? end)

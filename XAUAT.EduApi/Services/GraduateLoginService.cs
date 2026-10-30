@@ -25,7 +25,7 @@ public sealed class GraduateLoginService(
     ILogger<GraduateLoginService> logger) : IGraduateLoginService
 {
     /// <summary>
-    /// 研究生系统受 CAS 保护的入口（与 <c>py_src/get_data.py</c> 里写死的地址一致）。
+    /// 研究生系统受 CAS 保护的入口（与 <c>src/get_data.py</c> 里写死的地址一致）。
     /// <b>不要换成 <c>/pyxx/pygl/xskbcx</c></b>：那是登录后要抓的课表页，
     /// 作为登录入口虽然也能跳到认证服务器，但落地页与 cookie 归属不同。
     /// </summary>

@@ -217,7 +217,7 @@ transport.
 
 ### 研究生教务系统（`x-loginMode: 1`）
 
-研究生系统（`gmis.xauat.edu.cn`，参考实现见仓库外的 `py_src/`）只覆盖**登录**与**课表**；
+研究生系统（`gmis.xauat.edu.cn`，参考实现见仓库外的 `src/`）只覆盖**登录**与**课表**；
 校车、电费、饭卡、地图等非教务接口对两个系统是通用的，不读这个头。
 
 通用头契约（`LoginModeExtensions`）：
@@ -254,8 +254,12 @@ OpenAPI 文档由 `LoginModeHeaderOperationTransformer` 只给这两个控制器
 - **字符集**：`gmis` 的 `Content-Type` 不带 charset，`GraduateHtmlDecoder` 按
   Content-Type → `<meta charset>` → UTF-8 合法性 → GB18030 的顺序解码。若按 UTF-8
   硬解 GBK 页面，中文会静默乱码、正则匹配不到课程，表现为"登录成功但课表为空"。
+- **教室拆分**：教室字段形如 `校区-楼栋-房间`，`GraduateTimetableParser.SplitRoom`
+  取首段作校区、末段作教室；**末段是纯房间号（`208`、`208A`）时要把倒数第二段拼回来**
+  （`草堂校区-草堂校区9号楼-草堂9-208` → 教室 `草堂9-208`），否则楼栋会被丢掉，
+  两个楼的同名房间分不开——而且是静默丢，不报错。
 
-`py_src/` 只是移植参考，不是运行时依赖；改动解析规则时请同步核对
+`src/` 只是移植参考，不是运行时依赖；改动解析规则时请同步核对
 `python3 -c "..."` 的原始输出。
 
 ## New POI Data Import

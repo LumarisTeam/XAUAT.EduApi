@@ -10,7 +10,7 @@ namespace XAUAT.EduApi.Services;
 /// <summary>
 /// 研究生教务系统课表抓取：<c>gmis.xauat.edu.cn/pyxx/pygl/xskbcx</c> → HTML → <see cref="CourseActivity"/>。
 /// <para>
-/// 抓取逻辑移植自 <c>py_src/get_data.py</c>；页面解析见 <see cref="GraduateTimetableParser"/>。
+/// 抓取逻辑移植自仓库外的 <c>src/get_data.py</c>；页面解析见 <see cref="GraduateTimetableParser"/>。
 /// </para>
 /// <para>
 /// <b>传输层必须复用 <c>UnifiedAuthClient</c></b>，不要换成 <c>CreateClient()</c>：

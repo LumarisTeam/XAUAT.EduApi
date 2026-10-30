@@ -3,7 +3,7 @@ using XAUAT.EduApi.Services;
 namespace XAUAT.EduApi.Tests.Services;
 
 /// <summary>
-/// 研究生课表解析器：输入是 <c>py_src/parse_html.py</c> 处理的那种
+/// 研究生课表解析器：输入是 <c>src/parse_html.py</c> 处理的那种
 /// "JS 单元格赋值"页面，输出与本科生同构的 <c>CourseActivity</c>。
 /// </summary>
 public class GraduateTimetableParserTests
@@ -111,6 +111,33 @@ public class GraduateTimetableParserTests
         Assert.Equal("数据库\"原理\"", course.CourseName);
         Assert.Equal("A201", course.Room);
         Assert.Equal(new[] { 1, 2 }, course.WeekIndexes);
+    }
+
+    /// <summary>
+    /// 教室字段的校区/教室拆分必须与参考实现 <c>src/parse_html.py</c> 的 <c>_split_room</c> 一致：
+    /// 最后一段是纯房间号时，楼栋简称在倒数第二段，要拼回来。
+    /// </summary>
+    [Theory]
+    [InlineData("草堂校区-草堂校区9号楼-草堂9-208", "草堂校区", "草堂9-208")]
+    [InlineData("草堂校区-草堂校区9号楼-草堂9-208A", "草堂校区", "草堂9-208A")]
+    [InlineData("草堂校区-教学楼-101", "草堂校区", "教学楼-101")]
+    [InlineData("草堂校区-草堂校区南山书院-南山书院303", "草堂校区", "南山书院303")]
+    [InlineData("草堂校区-教学楼-A201", "草堂校区", "A201")]
+    [InlineData("草堂校区-图书馆-报告厅", "草堂校区", "报告厅")]
+    [InlineData("报告厅", "报告厅", "未知")]
+    public void Parse_ShouldSplitClassroomLikeReferenceImplementation(
+        string classroom, string expectedCampus, string expectedRoom)
+    {
+        var html = $$"""
+            var td = document.getElementById("td_1_41");
+            td.innerHTML += "课程:测试<br>主讲教师:张三<br>教室:{{classroom}}(第1-2周)";
+            hb_cell();
+            """;
+
+        var course = Assert.Single(GraduateTimetableParser.Parse(html));
+
+        Assert.Equal(expectedCampus, course.Campus);
+        Assert.Equal(expectedRoom, course.Room);
     }
 
     [Fact]

@@ -8,7 +8,7 @@ public enum EduSystemMode
     /// <summary>本科生教务系统（<c>swjw</c>）。缺省值。</summary>
     Undergraduate = 0,
 
-    /// <summary>研究生教务系统（<c>gmis</c>，原 <c>py_src</c> 的 Python 实现）。</summary>
+    /// <summary>研究生教务系统（<c>gmis</c>，原 <c>src</c> 的 Python 实现）。</summary>
     Graduate = 1
 }
 
