@@ -117,11 +117,18 @@ public class ElectricityService(
         document.LoadHtml(html);
 
         var tables = document.DocumentNode.SelectNodes("//table");
+        if (tables is null)
+        {
+            // 上游页面没有 table：常见于登录失效返回的错误页或页面结构变化。
+            // 返回空集合，避免在下面的 foreach 上抛 NullReferenceException。
+            return [];
+        }
+
         var data = new List<ElectricData>();
         foreach (var table in tables)
         {
             var rows = table.SelectNodes(".//tr");
-            if (rows == null!)
+            if (rows is null)
             {
                 continue;
             }

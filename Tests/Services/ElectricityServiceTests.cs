@@ -130,6 +130,20 @@ public class ElectricityServiceTests
     }
 
     [Fact]
+    public async Task FetchWeeklyDataAsync_ShouldReturnEmpty_WhenPageHasNoTable()
+    {
+        // 生产场景：登录失效或页面结构变化时，上游返回的是没有 <table> 的错误页。
+        var sourceUrl = "https://example.com/wxAccount?id=5";
+        const string html = "<html><body>登录已失效</body></html>";
+
+        ConfigureHttpClient(html);
+
+        var result = await _service.FetchWeeklyDataAsync(sourceUrl);
+
+        Assert.Empty(result);
+    }
+
+    [Fact]
     public async Task GetRechargeUrlAsync_ShouldReturnDerivedUrl_WhenSourceUrlExists()
     {
         var sourceUrl = "https://example.com/wxAccount?id=4";

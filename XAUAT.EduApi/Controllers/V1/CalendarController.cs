@@ -135,13 +135,20 @@ public class CalendarController(
     /// 日历接口历史的错误形状是 <c>{"error": ...}</c>（key 不是 <c>message</c>），
     /// 与其它 v1 端点的 <c>ApiResponse</c> 信封不同——这里保留老形状。
     /// </summary>
-    private ObjectResult CalendarError(int statusCode, string message, int? retryAfterSeconds = null)
+    private IActionResult CalendarError(int statusCode, string message, int? retryAfterSeconds = null)
     {
         if (retryAfterSeconds is not null)
         {
             Response.Headers.RetryAfter = retryAfterSeconds.Value.ToString(CultureInfo.InvariantCulture);
         }
 
-        return StatusCode(statusCode, new ErrorResponse { error = message });
+        // 控制器标了 [Produces("text/calendar")]，错误分支再走内容协商会找不到
+        // text/calendar formatter：MVC 只打一条 Warning，响应体为空。用 JsonResult
+        // 固定按 JSON 输出，错误信息才能到达客户端。
+        return new JsonResult(new ErrorResponse { error = message })
+        {
+            StatusCode = statusCode,
+            ContentType = "application/json; charset=utf-8"
+        };
     }
 }

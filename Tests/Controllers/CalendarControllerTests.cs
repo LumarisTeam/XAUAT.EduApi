@@ -56,8 +56,8 @@ public class CalendarControllerTests
 
     private static string? ErrorOf(IActionResult result)
     {
-        var objectResult = Assert.IsType<ObjectResult>(result);
-        return Assert.IsType<ErrorResponse>(objectResult.Value).error;
+        var jsonResult = Assert.IsType<JsonResult>(result);
+        return Assert.IsType<ErrorResponse>(jsonResult.Value).error;
     }
 
     [Fact]
@@ -127,8 +127,8 @@ public class CalendarControllerTests
 
         var result = await controller.GetCalendar(username, password, null, null, null, CancellationToken.None);
 
-        var objectResult = Assert.IsType<ObjectResult>(result);
-        Assert.Equal(StatusCodes.Status400BadRequest, objectResult.StatusCode);
+        var jsonResult = Assert.IsType<JsonResult>(result);
+        Assert.Equal(StatusCodes.Status400BadRequest, jsonResult.StatusCode);
         Assert.Equal("缺少用户名或密码", ErrorOf(result));
         calendarService.Verify(x => x.GenerateAsync(
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -141,8 +141,8 @@ public class CalendarControllerTests
 
         var result = await controller.GetCalendar("2024001", "bad", null, null, null, CancellationToken.None);
 
-        var objectResult = Assert.IsType<ObjectResult>(result);
-        Assert.Equal(StatusCodes.Status401Unauthorized, objectResult.StatusCode);
+        var jsonResult = Assert.IsType<JsonResult>(result);
+        Assert.Equal(StatusCodes.Status401Unauthorized, jsonResult.StatusCode);
         Assert.Equal(MessageLocalizer.Get("zh", ApiMessageKey.InvalidUsernameOrPassword), ErrorOf(result));
     }
 
@@ -155,8 +155,8 @@ public class CalendarControllerTests
 
         var result = await controller.GetCalendar("2024001", "pw", null, null, null, CancellationToken.None);
 
-        var objectResult = Assert.IsType<ObjectResult>(result);
-        Assert.Equal(StatusCodes.Status429TooManyRequests, objectResult.StatusCode);
+        var jsonResult = Assert.IsType<JsonResult>(result);
+        Assert.Equal(StatusCodes.Status429TooManyRequests, jsonResult.StatusCode);
         Assert.Equal(MessageLocalizer.Get("zh", ApiMessageKey.AccountBanned), ErrorOf(result));
         // Retry-After 必须来自上游给的解封时刻（约 2 小时），不是本地限流窗口
         var retryAfter = int.Parse(controller.Response.Headers.RetryAfter.ToString());
@@ -170,8 +170,8 @@ public class CalendarControllerTests
 
         var result = await controller.GetCalendar("2024001", "pw", null, null, null, CancellationToken.None);
 
-        var objectResult = Assert.IsType<ObjectResult>(result);
-        Assert.Equal(StatusCodes.Status429TooManyRequests, objectResult.StatusCode);
+        var jsonResult = Assert.IsType<JsonResult>(result);
+        Assert.Equal(StatusCodes.Status429TooManyRequests, jsonResult.StatusCode);
         Assert.Equal(MessageLocalizer.Get("zh", ApiMessageKey.EduSystemRateLimited), ErrorOf(result));
         // 没有学生限流状态时兜底 60 秒
         Assert.Equal("60", controller.Response.Headers.RetryAfter.ToString());
@@ -184,8 +184,8 @@ public class CalendarControllerTests
 
         var result = await controller.GetCalendar("2024001", "pw", null, null, null, CancellationToken.None);
 
-        var objectResult = Assert.IsType<ObjectResult>(result);
-        Assert.Equal(StatusCodes.Status500InternalServerError, objectResult.StatusCode);
+        var jsonResult = Assert.IsType<JsonResult>(result);
+        Assert.Equal(StatusCodes.Status500InternalServerError, jsonResult.StatusCode);
         // 内部错误细节不外泄
         Assert.Equal(MessageLocalizer.Get("zh", ApiMessageKey.EduSystemAccessFailed), ErrorOf(result));
     }
