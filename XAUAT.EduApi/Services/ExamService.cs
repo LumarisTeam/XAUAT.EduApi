@@ -78,13 +78,15 @@ public class ExamService(
         }
 
         // 使用 Task.WhenAll 并行获取所有学生的考试安排，解决 N+1 问题
-        var tasks = split.Select(s => GetExamArrangementAsync(cookie, s, language, [s])).ToArray();
+        var tasks = split.Select(s => EduSystemThrottler.ThrottleAsync(
+            () => GetExamArrangementAsync(cookie, s, language, [s]))).ToArray();
         var allResults = await Task.WhenAll(tasks).ConfigureAwait(false);
 
         // 合并结果
         var examResponse = new ExamResponse
         {
-            CanClick = allResults.Any(result => result.CanClick || result.Exams.Count > 0)
+            CanClick = allResults.Any(result => result.CanClick || result.Exams.Count > 0),
+            Error = allResults.FirstOrDefault(result => result.Error != null)?.Error
         };
         foreach (var result in allResults)
         {
@@ -150,16 +152,21 @@ public class ExamService(
         string language = "zh",
         IEnumerable<string>? requestStudentIds = null)
     {
-        // 无id时不使用缓存
-        if (string.IsNullOrEmpty(id))
+        try
         {
-            return await FetchExamArrangementAsync(cookie, null, language, requestStudentIds);
-        }
+            if (string.IsNullOrEmpty(id))
+                return await FetchExamArrangementAsync(cookie, null, language, requestStudentIds);
 
-        return await cacheService.GetOrCreateAsync(
-            CacheKeys.ExamArrangement(id),
-            async () => await FetchExamArrangementAsync(cookie, id, language, requestStudentIds ?? [id]),
-            TimeSpan.FromHours(1));
+            return await cacheService.GetOrCreateAsync(
+                CacheKeys.ExamArrangement(id),
+                () => FetchExamArrangementAsync(cookie, id, language, requestStudentIds ?? [id]),
+                TimeSpan.FromHours(1));
+        }
+        catch (Exception ex) when (ex is not RateLimitException and not UnAuthenticationError and not StudentCooldownException)
+        {
+            logger.LogError(ex, "Error getting exam arrangements");
+            return new ExamResponse { Exams = [], CanClick = false, Error = ex.Message };
+        }
     }
 
     private async Task<ExamResponse> FetchExamArrangementAsync(
@@ -200,6 +207,8 @@ public class ExamService(
                     try
                     {
                         content.ThrowIfAuthOrRateLimited();
+                        if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+                            throw new RateLimitException();
                     }
                     catch (Exception)
                     {
@@ -224,6 +233,8 @@ public class ExamService(
                         throw;
                     }
 
+                    if (!response.IsSuccessStatusCode)
+                        throw new InvalidDataException($"考试系统返回 HTTP {(int)response.StatusCode}");
                     var examData = ParseNow(content);
                     if (examData != null!)
                     {
@@ -270,16 +281,6 @@ public class ExamService(
         {
             throw;
         }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Error getting exam arrangements");
-            return new ExamResponse
-            {
-                Exams = [],
-                CanClick = false,
-                Error = ex.Message
-            };
-        }
     }
 
     private List<ExamInfo> ParseNow(string html)
@@ -298,7 +299,9 @@ public class ExamService(
 
             // 表格可能自带 tbody，也可能把 tr 直接挂在 table 下——两种都要认
             var rows = htmlDoc.DocumentNode.SelectNodes("//table[@id='exams']//tr");
-            if (rows == null!) return [];
+            if (htmlDoc.DocumentNode.SelectSingleNode("//table[@id='exams']") == null)
+                throw new InvalidDataException("考试页面缺少考试表格");
+            if (rows == null) return [];
 
             foreach (var row in rows)
             {
@@ -327,7 +330,7 @@ public class ExamService(
         }
         catch (Exception ex)
         {
-            Console.WriteLine("解析发生错误: " + ex.Message);
+            throw new InvalidDataException("解析考试页面失败", ex);
         }
 
         return result;

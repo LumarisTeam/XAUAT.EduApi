@@ -168,6 +168,42 @@ public class ExamServiceTests
 
     #endregion
 
+    [Theory]
+    [InlineData(HttpStatusCode.OK, "<html>unexpected page</html>")]
+    [InlineData(HttpStatusCode.ServiceUnavailable, "<table id=\"exams\"></table>")]
+    public async Task InvalidExamResponse_ShouldNotBeCached(HttpStatusCode status, string body)
+    {
+        var calls = 0;
+        var handler = new Mock<HttpMessageHandler>();
+        handler.Protected().Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(() =>
+            {
+                calls++;
+                return calls == 1
+                    ? new HttpResponseMessage(status) { Content = new StringContent(body) }
+                    : new HttpResponseMessage(HttpStatusCode.OK)
+                        { Content = new StringContent("<table id=\"exams\"></table>") };
+            });
+        _httpClientFactoryMock.Setup(m => m.CreateClient(It.IsAny<string>()))
+            .Returns(() => new HttpClient(handler.Object, false));
+
+        ExamResponse? cached = null;
+        _cacheServiceMock.Setup(m => m.GetOrCreateAsync(
+                It.IsAny<string>(), It.IsAny<Func<Task<ExamResponse>>>(), It.IsAny<TimeSpan?>(),
+                It.IsAny<CacheLevel>(), It.IsAny<int>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()))
+            .Returns(async (string key, Func<Task<ExamResponse>> factory, TimeSpan? expiration,
+                CacheLevel level, int priority, CancellationToken ct, bool use) =>
+                cached ??= await factory());
+
+        var first = await _examService.GetExamArrangementsAsync("cookie", "123");
+        var second = await _examService.GetExamArrangementsAsync("cookie", "123");
+
+        Assert.NotNull(first.Error);
+        Assert.Null(second.Error);
+        Assert.Equal(2, calls);
+    }
+
     #region GetExamArrangementsAsync Tests
 
     [Fact]
@@ -330,8 +366,8 @@ public class ExamServiceTests
                 Content = new StringContent("<html>var studentExamInfoVms = [];</html>")
             });
 
-        var httpClient = new HttpClient(handlerMock.Object);
-        _httpClientFactoryMock.Setup(m => m.CreateClient(It.IsAny<string>())).Returns(httpClient);
+        _httpClientFactoryMock.Setup(m => m.CreateClient(It.IsAny<string>()))
+            .Returns(() => new HttpClient(handlerMock.Object, false));
 
         // Act
         var result = await _examService.GetExamArrangementsAsync(cookie, id);
@@ -471,8 +507,7 @@ public class ExamServiceTests
                 Content = new StringContent("<html><table id=\"exams\"></table></html>")
             });
 
-        var httpClient = new HttpClient(handlerMock.Object);
-        _httpClientFactoryMock.Setup(m => m.CreateClient(It.IsAny<string>())).Returns(httpClient);
+        _httpClientFactoryMock.Setup(m => m.CreateClient(It.IsAny<string>())).Returns(() => new HttpClient(handlerMock.Object, false));
 
         // Act
         var result = await _examService.GetExamArrangementsAsync(cookie, id);
