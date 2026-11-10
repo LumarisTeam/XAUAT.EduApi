@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json;
 using XAUAT.EduApi.Exceptions;
 using XAUAT.EduApi.Localization;
 using XAUAT.EduApi.Login.Xauat;
@@ -30,7 +31,8 @@ internal sealed class UnifiedSsoClient(
     IHttpClientFactory httpClientFactory,
     HostAllowList allowList,
     ILogger<UnifiedSsoClient> logger,
-    CasAttemptGuard? casGuard = null) : IUnifiedSsoClient
+    CasAttemptGuard? casGuard = null,
+    ILoginRedisStore? redis = null) : IUnifiedSsoClient
 {
     /// <summary>
     /// 专用命名客户端：关自动重定向与自动 cookie（同 <c>XauatAuthClient</c>），
@@ -44,7 +46,62 @@ internal sealed class UnifiedSsoClient(
     /// <summary>登录页的判定：能不能解析出 UAAP 的登录表单。</summary>
     private static bool LooksLikeLoginPage(string html) => XauatHtmlParser.LooksLikeCasLoginPage(html);
 
+    // 条带锁合并同一进程内的重复请求，避免缓存尚未写入时并发提交凭据。
+    private readonly SemaphoreSlim[] _locks = Enumerable.Range(0, 64).Select(_ => new SemaphoreSlim(1, 1)).ToArray();
+    private static readonly TimeSpan TargetCacheTtl = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan TicketCacheTtl = TimeSpan.FromDays(1);
+
+    private sealed record CachedCookie(string Host, string Name, string Value);
+    private sealed record CachedOutcome(string AuthServerUrl, string LandingUrl, string LandingCookie, List<CachedCookie> Cookies);
+
+    private static string CacheKey(string kind, params string[] values)
+        => $"unified:{kind}:{PasswordEncryptor.Sha256Hex(JsonSerializer.Serialize(values))}";
+
     public async Task<UnifiedAuthOutcome> LoginAsync(UnifiedAuthCommand command, CancellationToken cancellationToken)
+    {
+        if (!Uri.TryCreate(command.EntryUrl, UriKind.Absolute, out var target))
+            throw new UnifiedAuthRequestException(ApiMessageKey.UnifiedAuthInvalidTarget, "目标地址不是合法的绝对 URL");
+        EnsureAllowed(target);
+        var targetKey = CacheKey("session", command.EntryUrl, command.Username, command.Password);
+        var stripe = _locks[(int)(Convert.ToUInt32(targetKey[^8..], 16) % (uint)_locks.Length)];
+        await stripe.WaitAsync(cancellationToken);
+        try
+        {
+            var cached = await ReadSessionAsync(targetKey);
+            if (cached is not null) return cached;
+            var outcome = await LoginCoreAsync(command, cancellationToken);
+            if (outcome.Success && !string.IsNullOrWhiteSpace(outcome.LandingCookie) && redis?.IsAvailable == true)
+            {
+                var data = new CachedOutcome(outcome.AuthServerUrl!, outcome.LandingUrl!, outcome.LandingCookie,
+                    (outcome.Cookies ?? []).Select(c => new CachedCookie(c.Host, c.Name, c.Value)).ToList());
+                await redis.SetStringAsync(targetKey, JsonSerializer.Serialize(data), TargetCacheTtl);
+            }
+            return outcome;
+        }
+        finally { stripe.Release(); }
+    }
+
+    private async Task<UnifiedAuthOutcome?> ReadSessionAsync(string key)
+    {
+        if (redis?.IsAvailable != true) return null;
+        var raw = await redis.GetStringAsync(key);
+        if (string.IsNullOrEmpty(raw)) return null;
+        try
+        {
+            var data = JsonSerializer.Deserialize<CachedOutcome>(raw);
+            if (data is null || string.IsNullOrWhiteSpace(data.LandingCookie) || data.Cookies is null ||
+                !Uri.TryCreate(data.AuthServerUrl, UriKind.Absolute, out var auth) ||
+                !Uri.TryCreate(data.LandingUrl, UriKind.Absolute, out var landing)) return null;
+            EnsureAllowed(auth);
+            EnsureAllowed(landing);
+            return new UnifiedAuthOutcome(true, "登录成功", UnifiedAuthFailure.None, data.AuthServerUrl,
+                data.LandingUrl, data.LandingCookie, data.Cookies.Select(c => (c.Host, c.Name, c.Value)).ToList());
+        }
+        catch (JsonException) { return null; }
+        catch (UnifiedAuthRequestException) { return null; }
+    }
+
+    private async Task<UnifiedAuthOutcome> LoginCoreAsync(UnifiedAuthCommand command, CancellationToken cancellationToken)
     {
         if (!Uri.TryCreate(command.EntryUrl, UriKind.Absolute, out var entry))
         {
@@ -66,6 +123,37 @@ internal sealed class UnifiedSsoClient(
                     "该地址未跳转到统一身份认证登录页，可能不需要认证或不是受 CAS 保护的页面");
             }
 
+            // 认证服务器由可信的逐跳发现得到；票据按认证源、账号和密码隔离。
+            var ticketKey = CacheKey("ticket", loginPage.Url.GetLeftPart(UriPartial.Authority).ToLowerInvariant(),
+                command.Username, command.Password);
+            if (redis?.IsAvailable == true && await redis.GetStringAsync(ticketKey) is { Length: > 0 } ticket)
+            {
+                jar.Seed(loginPage.Url.Host, $"CASTGC={ticket}");
+                using var exchangeRequest = new HttpRequestMessage(HttpMethod.Get, loginPage.Url);
+                using var exchangeResponse = await XauatHttpSession.SendAsync(client, exchangeRequest, jar, cancellationToken);
+                if (IsRedirect(exchangeResponse.StatusCode) && exchangeResponse.Headers.Location is not null)
+                {
+                    var exchanged = await FollowBackAsync(client, jar, Resolve(loginPage.Url, exchangeResponse.Headers.Location),
+                        loginPage.Url, cancellationToken);
+                    if (exchanged.Success)
+                    {
+                        await SaveTicketAsync(ticketKey, exchanged, loginPage.Url.Host);
+                        return exchanged;
+                    }
+                    if (exchanged.Failure != UnifiedAuthFailure.InvalidCredentials) return exchanged;
+                }
+                else if ((int)exchangeResponse.StatusCode >= 500)
+                    return UnifiedAuthOutcome.Fail(UnifiedAuthFailure.Upstream, "认证服务器换票失败");
+
+                // 失效票据不得继续带入密码登录；重新发现登录页以获取新的表单与会话。
+                await redis.DeleteAsync(ticketKey);
+                jar = new XauatCookieJar();
+                loginPage = await DiscoverLoginPageAsync(client, jar, entry, cancellationToken);
+                if (loginPage is null || !string.Equals(loginPage.Url.GetLeftPart(UriPartial.Authority),
+                        exchangeRequest.RequestUri!.GetLeftPart(UriPartial.Authority), StringComparison.OrdinalIgnoreCase))
+                    return UnifiedAuthOutcome.Fail(UnifiedAuthFailure.Upstream, "认证服务器发生变化，请重试");
+            }
+
             var fields = XauatHtmlParser.ParseLoginPage(loginPage.Html);
             var form = BuildLoginForm(loginPage.Html, command, fields);
 
@@ -75,7 +163,9 @@ internal sealed class UnifiedSsoClient(
             if (casGuard is not null && await casGuard.AcquireAsync(loginPage.Url.Host, command.Username) is { } retry)
                 throw new RateLimitException(retry);
 
-            return await SubmitCredentialsAsync(client, jar, loginPage, form, cancellationToken);
+            var result = await SubmitCredentialsAsync(client, jar, loginPage, form, cancellationToken);
+            if (result.Success) await SaveTicketAsync(ticketKey, result, loginPage.Url.Host);
+            return result;
         }
         catch (RateLimitException)
         {
@@ -109,6 +199,14 @@ internal sealed class UnifiedSsoClient(
             logger.LogError(ex, "通用统一认证：登录出错");
             return UnifiedAuthOutcome.Fail(UnifiedAuthFailure.Upstream, $"登录出错：{ex.Message}");
         }
+    }
+
+    private async Task SaveTicketAsync(string key, UnifiedAuthOutcome outcome, string host)
+    {
+        if (redis?.IsAvailable != true) return;
+        var ticket = outcome.Cookies?.LastOrDefault(c =>
+            string.Equals(c.Host, host, StringComparison.OrdinalIgnoreCase) && c.Name == "CASTGC").Value;
+        if (!string.IsNullOrWhiteSpace(ticket)) await redis.SetStringAsync(key, ticket, TicketCacheTtl);
     }
 
     // ================================================================ 阶段 1：发现登录页

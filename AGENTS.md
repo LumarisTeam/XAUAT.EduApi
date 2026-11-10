@@ -94,7 +94,9 @@ A **generic** CAS / 金智 UAAP login: the caller passes only a protected target
 credentials (`POST /v1/login/unified`), and the server discovers the auth server from the
 redirect chain (the login page URL carries the `service` parameter), parses the page's hidden
 inputs + `pwdEncryptSalt`, submits the form, then walks the redirects back to plant the session
-cookie. Unlike `Login/`, it uses **no Redis** — every call really logs in, so cookies rotate.
+cookie. It caches target sessions for 2 minutes and CASTGC tickets for 1 day in Redis, isolated
+by target or authentication origin and credentials. It tries a cached ticket before submitting
+credentials, and falls back to a full login when the ticket expires. Redis outages bypass caching.
 
 Two things here are security-relevant and easy to weaken by accident:
 

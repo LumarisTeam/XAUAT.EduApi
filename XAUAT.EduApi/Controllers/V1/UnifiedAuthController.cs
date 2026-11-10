@@ -12,7 +12,7 @@ namespace XAUAT.EduApi.Controllers.V1;
 /// <para>
 /// 与 <c>POST v1/login</c> 的分工：<c>v1/login</c> 是 XAUAT 教务系统的专用入口
 /// （带缓存、限流、封禁，返回教务 cookie）；本接口不绑定任何学校，
-/// 只要目标地址背后是 CAS/金智 UAAP 就能用，每次调用都会真的去登录一次。
+/// 只要目标地址背后是 CAS/金智 UAAP 就能用；短期缓存目标会话，并在可能时复用 SSO 票据。
 /// 两个入口在提交凭据前共用按认证服务器和账号划分的限流。
 /// </para>
 /// <para>

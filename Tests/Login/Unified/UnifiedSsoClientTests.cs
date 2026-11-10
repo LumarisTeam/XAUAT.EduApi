@@ -102,6 +102,74 @@ public class UnifiedSsoClientTests
                 () => FakeResponses.Html(LandingPageHtml, HttpStatusCode.OK, "__pstsid__=abc123; Path=/"));
     }
 
+    [Fact]
+    public async Task Login_ReusesTargetSessionWithoutAnotherRequest()
+    {
+        ScriptHappyPath();
+        var client = new UnifiedSsoClient(new StubHttpClientFactory(_handler), HostAllowList.Create(null),
+            NullLogger<UnifiedSsoClient>.Instance, redis: new FakeLoginRedisStore());
+        var command = new UnifiedAuthCommand(TargetUrl, Username, Password);
+        var first = await client.LoginAsync(command, CancellationToken.None);
+        var count = _handler.Sent.Count;
+        var second = await client.LoginAsync(command, CancellationToken.None);
+        Assert.True(first.Success);
+        Assert.Equal(first.LandingCookie, second.LandingCookie);
+        Assert.Equal(count, _handler.Sent.Count);
+    }
+
+    [Fact]
+    public async Task Login_UsesCachedTicketForAnotherTargetWithoutSubmittingPassword()
+    {
+        const string otherTarget = "https://other.xauat.edu.cn/protected";
+        const string otherCallback = "https://other.xauat.edu.cn/callback?ticket=ST-2";
+        var loginUrl = AuthServerPrefix + "?service=https%3A%2F%2Fswjw.xauat.edu.cn%2Fstudent%2Fsso%2Flogin";
+        _handler.OnGet(TargetUrl, () => FakeResponses.Redirect(loginUrl))
+            .OnGet(otherTarget, () => FakeResponses.Redirect(loginUrl))
+            .On(request => request.Method == HttpMethod.Get && request.RequestUri!.ToString().StartsWith(AuthServerPrefix),
+                request => request.Headers.TryGetValues("Cookie", out var values) && values.Any(v => v.Contains("CASTGC=TGT-1234"))
+                    ? FakeResponses.Redirect(otherCallback) : FakeResponses.Html(LoginPageHtml))
+            .OnPostStartingWith(AuthServerPrefix, () => FakeResponses.Redirect(CallbackUrl, "CASTGC=TGT-1234; Path=/"))
+            .OnGet(CallbackUrl, () => FakeResponses.Html(LandingPageHtml, HttpStatusCode.OK, "session=first"))
+            .OnGet(otherCallback, () => FakeResponses.Html(LandingPageHtml, HttpStatusCode.OK, "session=second"));
+        var client = new UnifiedSsoClient(new StubHttpClientFactory(_handler), HostAllowList.Create(null),
+            NullLogger<UnifiedSsoClient>.Instance, redis: new FakeLoginRedisStore());
+        Assert.True((await client.LoginAsync(new UnifiedAuthCommand(TargetUrl, Username, Password), CancellationToken.None)).Success);
+        var second = await client.LoginAsync(new UnifiedAuthCommand(otherTarget, Username, Password), CancellationToken.None);
+        Assert.True(second.Success);
+        Assert.Equal("session=second", second.LandingCookie);
+        Assert.Single(_handler.Sent, r => r.Method == "POST");
+    }
+
+    [Fact]
+    public async Task Login_ExpiredTicketFallsBackToPasswordWithoutSendingOldTicket()
+    {
+        const string otherTarget = "https://other.xauat.edu.cn/protected";
+        var loginUrl = AuthServerPrefix + "?service=https%3A%2F%2Fswjw.xauat.edu.cn%2Fstudent%2Fsso%2Flogin";
+        _handler.OnGet(TargetUrl, () => FakeResponses.Redirect(loginUrl))
+            .OnGet(otherTarget, () => FakeResponses.Redirect(loginUrl))
+            .OnGetStartingWith(AuthServerPrefix, () => FakeResponses.Html(LoginPageHtml))
+            .OnPostStartingWith(AuthServerPrefix, () => FakeResponses.Redirect(CallbackUrl, "CASTGC=TGT-1234"))
+            .OnGet(CallbackUrl, () => FakeResponses.Html(LandingPageHtml, HttpStatusCode.OK, "session=ok"));
+        var client = new UnifiedSsoClient(new StubHttpClientFactory(_handler), HostAllowList.Create(null),
+            NullLogger<UnifiedSsoClient>.Instance, redis: new FakeLoginRedisStore());
+        Assert.True((await client.LoginAsync(new UnifiedAuthCommand(TargetUrl, Username, Password), CancellationToken.None)).Success);
+        Assert.True((await client.LoginAsync(new UnifiedAuthCommand(otherTarget, Username, Password), CancellationToken.None)).Success);
+        var posts = _handler.Sent.Where(r => r.Method == "POST").ToArray();
+        Assert.Equal(2, posts.Length);
+        Assert.DoesNotContain("CASTGC", posts[1].CookieHeader ?? "", StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Login_DifferentPasswordDoesNotReuseCachedSessionOrTicket()
+    {
+        ScriptHappyPath();
+        var client = new UnifiedSsoClient(new StubHttpClientFactory(_handler), HostAllowList.Create(null),
+            NullLogger<UnifiedSsoClient>.Instance, redis: new FakeLoginRedisStore());
+        Assert.True((await client.LoginAsync(new UnifiedAuthCommand(TargetUrl, Username, Password), CancellationToken.None)).Success);
+        Assert.True((await client.LoginAsync(new UnifiedAuthCommand(TargetUrl, Username, "another-password"), CancellationToken.None)).Success);
+        Assert.Equal(2, _handler.Sent.Count(r => r.Method == "POST"));
+    }
+
     // ================================================================ 正常链路
 
     [Fact]

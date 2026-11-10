@@ -10,10 +10,8 @@ namespace XAUAT.EduApi.Services;
 /// <para>
 /// 与本科生 <c>SsoLoginService</c> 的差异是刻意的：
 /// <list type="bullet">
-/// <item><b>不走 Redis</b>。通用统一认证每次都会真的登录一次、cookie 会轮换，
-/// 缓存那套 <c>login-cookies-*</c> 键名是 XAUAT 本科生链路的兼容契约，不能复用。</item>
-/// <item><b>不做封禁/登录限流</b>。这两项目前只覆盖本科生链路；
-/// 研究生登录失败直接按 401 返回。</item>
+/// <item>复用通用认证的短期会话缓存和 SSO 票据缓存；不使用本科生的兼容键。</item>
+/// <item>提交密码时使用通用认证与本科生链路共享的认证服务器限流。</item>
 /// <item>学号直接取调用方传入的用户名——研究生系统的登录页不返回学号，
 /// 而用户名本身就是学号。</item>
 /// </list>
