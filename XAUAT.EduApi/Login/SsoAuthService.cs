@@ -47,7 +47,8 @@ internal sealed class SsoAuthService(
     IXauatSsoClient ssoClient,
     BanService banService,
     ILoginRedisStore redis,
-    ILogger<SsoAuthService> logger)
+    ILogger<SsoAuthService> logger,
+    CasAttemptGuard? casGuard = null)
 {
     /// <summary>唯一支持的学校。NWAFU 未随本次迁移，仍留在 Flask。</summary>
     private const string SupportedSchool = "xauat";
@@ -74,6 +75,7 @@ internal sealed class SsoAuthService(
         if (!redis.IsAvailable)
         {
             logger.LogWarning("Redis 不可用，将执行完整登录流程（无缓存）");
+            await GuardCasAsync(username);
             return await FullLoginWithoutCacheAsync(username, password, cancellationToken);
         }
 
@@ -122,6 +124,8 @@ internal sealed class SsoAuthService(
                 logger.LogWarning("用户 {Username} SSO 登录失败: {Message}", username, ssoResult.Message);
             }
         }
+
+        await GuardCasAsync(username);
 
         // ---- 限流检查：预占名额
         var (isRateLimited, failedCount) = await banService.AcquireRateLimitSlotAsync(rateLimitKey);
@@ -195,6 +199,12 @@ internal sealed class SsoAuthService(
         logger.LogInformation("用户 {Username} 登录成功", username);
 
         return SsoAuthResult.Ok(string.IsNullOrEmpty(result.EduCookie) ? result.SsoCookie : result.EduCookie);
+    }
+
+    private async Task GuardCasAsync(string username)
+    {
+        if (casGuard is not null && await casGuard.AcquireAsync(CasAttemptGuard.XauatHost, username) is { } retry)
+            throw new XAUAT.EduApi.Exceptions.RateLimitException(retry);
     }
 
     /// <summary>

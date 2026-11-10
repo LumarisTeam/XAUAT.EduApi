@@ -194,6 +194,7 @@ public static class ServiceCollectionExtensions
             // 与既有的 IStudentRateLimitState 同为单例一个道理。
             services.AddSingleton<ILoginRedisStore, LoginRedisStore>();
             services.AddSingleton<BanService>();
+            services.AddSingleton<CasAttemptGuard>();
             services.AddSingleton<StatisticsService>();
             services.AddSingleton<SsoAuthService>();
 

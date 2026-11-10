@@ -52,9 +52,9 @@ public class LoginController(
             return Unauthorized(ErrorResponse(ApiCodes.WrongCredentials,
                 Message(ApiMessageKey.InvalidUsernameOrPassword)));
         }
-        catch (RateLimitException)
+        catch (RateLimitException ex)
         {
-            return RateLimited(ApiMessageKey.EduSystemRateLimited);
+            return RateLimited(ApiMessageKey.EduSystemRateLimited, ex.RetryAfterSeconds);
         }
         catch (AccountBannedException ex)
         {

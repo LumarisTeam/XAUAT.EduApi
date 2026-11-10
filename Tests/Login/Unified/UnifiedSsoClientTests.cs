@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using XAUAT.EduApi.Exceptions;
 using XAUAT.EduApi.Localization;
 using XAUAT.EduApi.Login.Unified;
+using XAUAT.EduApi.Login;
 using XAUAT.EduApi.Tests.Login.TestSupport;
 
 namespace XAUAT.EduApi.Tests.Login.UnifiedAuth;
@@ -61,6 +62,21 @@ public class UnifiedSsoClientTests
         => new(new StubHttpClientFactory(_handler),
             allowList ?? HostAllowList.Create(null),
             NullLogger<UnifiedSsoClient>.Instance);
+
+    [Fact]
+    public async Task Login_WhenSharedCasLimitReached_DoesNotSubmitCredentials()
+    {
+        var guard = new CasAttemptGuard(new FakeLoginRedisStore());
+        for (var i = 0; i < CasAttemptGuard.MaxAttempts; i++)
+            await guard.AcquireAsync(CasAttemptGuard.XauatHost, Username);
+        ScriptHappyPath();
+        var client = new UnifiedSsoClient(new StubHttpClientFactory(_handler),
+            HostAllowList.Create(null), NullLogger<UnifiedSsoClient>.Instance, guard);
+        var error = await Assert.ThrowsAsync<RateLimitException>(() =>
+            client.LoginAsync(new UnifiedAuthCommand(TargetUrl, Username, Password), CancellationToken.None));
+        Assert.True(error.RetryAfterSeconds > 0);
+        Assert.DoesNotContain(_handler.Sent, request => request.Method == "POST");
+    }
 
     private Task<UnifiedAuthOutcome> LoginAsync(string url = TargetUrl)
         => CreateClient().LoginAsync(new UnifiedAuthCommand(url, Username, Password), CancellationToken.None);

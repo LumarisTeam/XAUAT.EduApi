@@ -12,8 +12,8 @@ namespace XAUAT.EduApi.Controllers.V1;
 /// <para>
 /// 与 <c>POST v1/login</c> 的分工：<c>v1/login</c> 是 XAUAT 教务系统的专用入口
 /// （带缓存、限流、封禁，返回教务 cookie）；本接口不绑定任何学校，
-/// 只要目标地址背后是 CAS/金智 UAAP 就能用，代价是没有缓存/封禁那套编排，
-/// 每次调用都会真的去登录一次。
+/// 只要目标地址背后是 CAS/金智 UAAP 就能用，每次调用都会真的去登录一次。
+/// 两个入口在提交凭据前共用按认证服务器和账号划分的限流。
 /// </para>
 /// <para>
 /// 安全性：<c>url</c> 由调用方指定，为防止 SSRF，服务端做了域名白名单
@@ -64,6 +64,10 @@ public class UnifiedAuthController(
             logger.LogWarning("通用统一认证凭据错误：{Message}", ex.Message);
             return Unauthorized(ErrorResponse(ApiCodes.WrongCredentials,
                 Message(ApiMessageKey.InvalidUsernameOrPassword)));
+        }
+        catch (RateLimitException ex)
+        {
+            return RateLimited(ApiMessageKey.EduSystemRateLimited, ex.RetryAfterSeconds);
         }
         catch (HttpRequestException ex)
         {

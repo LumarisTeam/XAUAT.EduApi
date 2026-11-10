@@ -23,13 +23,14 @@ namespace XAUAT.EduApi.Login.Unified;
 /// <para>
 /// 与 <see cref="XauatSsoClient"/> 的关系：那个类把 XAUAT 的地址、service 参数、加密方式全部写死，
 /// 是"一个学校一条链路"；本类是它的通用版，复用了同一套 cookie 罐、HTML 解析与密码加密，
-/// 但地址、表单字段、跳转跳数都来自运行时发现。两者互不影响——本类改动不会碰到既有登录链路。
+/// 但地址、表单字段、跳转跳数都来自运行时发现。两者共用凭据提交限流。
 /// </para>
 /// </summary>
 internal sealed class UnifiedSsoClient(
     IHttpClientFactory httpClientFactory,
     HostAllowList allowList,
-    ILogger<UnifiedSsoClient> logger) : IUnifiedSsoClient
+    ILogger<UnifiedSsoClient> logger,
+    CasAttemptGuard? casGuard = null) : IUnifiedSsoClient
 {
     /// <summary>
     /// 专用命名客户端：关自动重定向与自动 cookie（同 <c>XauatAuthClient</c>），
@@ -71,7 +72,14 @@ internal sealed class UnifiedSsoClient(
             logger.LogInformation("通用统一认证：已发现登录页 {LoginUrl}，准备提交凭据（学号 {Username}）",
                 Redact(loginPage.Url), command.Username);
 
+            if (casGuard is not null && await casGuard.AcquireAsync(loginPage.Url.Host, command.Username) is { } retry)
+                throw new RateLimitException(retry);
+
             return await SubmitCredentialsAsync(client, jar, loginPage, form, cancellationToken);
+        }
+        catch (RateLimitException)
+        {
+            throw;
         }
         catch (UnifiedAuthRequestException)
         {
