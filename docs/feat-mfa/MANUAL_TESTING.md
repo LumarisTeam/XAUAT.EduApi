@@ -548,6 +548,10 @@ while ((Get-Date) -lt $deadline) {
 财务平台注意：`logCas` 是 SPA，不写 cookie；以 `landingUrl` 里的 `ticket=ST-...` 为准，
 前端再调 `GET /api/logcas/caslogintoken?cas=<ticket>` 换 token。
 
+> **落地页不可达**：生产到财务平台 `:8080` 可能 30 秒超时。扫码/回调已经拿到 ticket 时，
+> 新版会返回 `200 / success`，`data.unified.landingUrl` 带 ticket，`data.unified.cookie` 为空；
+> 这是降级成功，不是 500。旧版会返回 500/50002「服务器内部错误」。
+
 ### 7.5 扫码方式的负向用例
 
 | 操作 | 预期 |
@@ -717,6 +721,7 @@ API **不会自动改密**：改密需要旧密码 + 新密码 + 确认密码，
 | 200 + `20003` 但不是最终成功 | 这是 MFA 挑战 | 继续调 `/v1/login/mfa` 或轮询 status |
 | 扫码一直 `pending` | 没扫/二维码过期 | 重新触发 `wechat_qr` |
 | 扫码后一直 `scanned` | 手机没点「确认登录」 | 在微信里确认 |
+| 扫码确认后 status 500 / 50002 | 最后落地页不可达（如财务 `:8080` 超时） | 新版会降级为 success + `landingUrl(ticket)`；若仍 500，看日志确认是哪一跳超时 |
 | `combinedLogin.do 未返回微信扫码跳转` | re-auth 页 `service` 被 JSON 转义（`\/`）或 HTTPS origin 问题 | 确认 `ReAuthPageParser` 已反转义；看日志里的 HTTP/Location |
 | 财务平台登录成功但 `cookie` 为空 | 财务落地页是 SPA，不写 cookie | 用 `landingUrl` 里的 ticket 换 token，不是 MFA 失败 |
 | 企微连接器 `url` 返回 10001 | `/cas` 当前是空壳，不跳 CAS | 改用 CAS 登录页 + `service` |

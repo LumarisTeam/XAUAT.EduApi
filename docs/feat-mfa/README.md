@@ -330,6 +330,11 @@ public string? PasswordChangeUrl { get; set; }
 响应头带 `Retry-After: 1`（202 时）。扫码方式是**长轮询**，单次请求可能阻塞十几秒到 30 秒，
 客户端超时应大于 35 秒。
 
+> **落地页不可达时的降级**：如果扫码/回调已经拿到 `ticket=ST-...`，只是最后访问业务落地页
+> （例如生产到财务平台 `:8080` 超时）失败，统一认证会返回 `success`，`landingUrl` 保留带
+> ticket 的地址，`cookie` 可能为空。调用方应把用户引导到该 `landingUrl` 完成落地；这不是
+> MFA 失败，也不会再返回 500。
+
 ### 4.4 错误码 / HTTP
 
 | 场景 | HTTP | Code |
@@ -460,8 +465,8 @@ dotnet run --project XAUAT.EduApi
 ### 7.1 自动化测试
 
 - `dotnet build`：成功；
-- `dotnet test`：**625 passed, 0 failed**（2026-11-14）；
-- MFA 子集：**28 passed, 0 failed**。
+- `dotnet test`：**627 passed, 0 failed**（2026-11-14）；
+- MFA + 统一认证客户端子集：**44 passed, 0 failed**。
 
 覆盖 `ReAuthPageParser`、`MfaSessionStore`、`ReAuthHandler`、`SsoAuthMfa`、`MfaController`，
 以及各链路已有的登录/缓存/限流测试。
@@ -503,10 +508,13 @@ dotnet run --project XAUAT.EduApi
   `/v1/login/unified` 表现为 502；
 - 用 `https://authserver.xauat.edu.cn/authserver/login?...` 作为 `url` 的统一认证在生产已成功
   （200/code 0，拿到 swjw cookie）。
+- 财务平台 `https://zhfwpt.xauat.edu.cn:8080` 从生产同样 30 秒超时；扫码确认后旧实现会在
+  最后落地跳转抛 `TaskCanceledException` → 500。现在跟票链在「已拿到 ticket、落地页不可达」时
+  返回 `success` + `landingUrl(ticket)`。
 
 修复：`XauatConstants.AuthServerUrl` 改为 HTTPS；`XauatConstants.SecureAuthServer` 在标准链路
-重定向与统一认证发现/回跳的每一跳把 authserver HTTP URL 升级为 HTTPS。部署后需重新验证
-`/v1/login` 与 `/v1/login/unified`。
+重定向、re-auth 跟票与统一认证发现/回跳的每一跳把 authserver HTTP URL 升级为 HTTPS。
+部署后需重新验证 `/v1/login`、`/v1/login/unified` 和扫码 status。
 
 ---
 
