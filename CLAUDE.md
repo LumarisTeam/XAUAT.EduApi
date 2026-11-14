@@ -147,10 +147,12 @@ Serilog timestamps and every other `DateTime.Now` in the process.
    delegates to `SsoAuthService`, which applies a three-tier priority:
    **cached eduCookie → exchange a cached SSO ticket → full CAS login** (rate-limit budget is
    pre-acquired only on the full-login path, so a cache hit never burns it).
-3. `XauatSsoClient` (`Login/Xauat/`) talks to `http://authserver.xauat.edu.cn` (plain HTTP,
-   upstream is like that) and then to `https://swjw.xauat.edu.cn`. **The CAS POST must not
-   follow redirects**, so a full login only yields the SSO ticket (`CASTGC`); the student
-   session is planted on the *second* hop of a manual redirect walk.
+3. `XauatSsoClient` (`Login/Xauat/`) talks to `https://authserver.xauat.edu.cn` and then to
+   `https://swjw.xauat.edu.cn`. 2026-11 实测生产出网到 authserver 的 80 端口会超时、443 正常，
+   上游 HTTP/HTTPS 的登录页与 POST 行为一致，因此默认 HTTPS；重定向链里的 authserver HTTP URL
+   会被 `XauatConstants.SecureAuthServer` 升级。**The CAS POST must not follow redirects**,
+   so a full login only yields the SSO ticket (`CASTGC`); the student session is planted on
+   the *second* hop of a manual redirect walk.
 4. `CookieCodeService` extracts the student ID from the returned cookies — the SSO handshake
    does not produce it, so this is a second upstream call.
 5. Subsequent requests pass cookies via `Cookie` or `xauat` header

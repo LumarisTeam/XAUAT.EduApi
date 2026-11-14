@@ -65,7 +65,8 @@ internal static class XauatHttpSession
                 return responses;
             }
 
-            currentUri = location.IsAbsoluteUri ? location : new Uri(currentUri, location);
+            currentUri = XauatConstants.SecureAuthServer(
+                location.IsAbsoluteUri ? location : new Uri(currentUri, location));
             current = new HttpRequestMessage(HttpMethod.Get, currentUri);
         }
 

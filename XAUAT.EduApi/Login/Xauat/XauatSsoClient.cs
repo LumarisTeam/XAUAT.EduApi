@@ -11,7 +11,9 @@ namespace XAUAT.EduApi.Login.Xauat;
 /// 它们全部来自上游，改动会直接导致登录失败：
 /// </para>
 /// <list type="bullet">
-/// <item>认证服务器是<b>明文 HTTP</b>。</item>
+/// <item>认证服务器登录页默认使用 <b>HTTPS</b>；2026-11 起生产出网到 80 端口会超时，
+/// 上游的 HTTP/HTTPS 页面与 POST 行为一致。重定向链里的 authserver HTTP URL 会被
+/// <see cref="XauatConstants.SecureAuthServer"/> 升级为 HTTPS。</item>
 /// <item>登录 POST 必须 <c>allow_redirects=False</c>，并且**只从 302 响应本身**取 cookie：
 /// Flask 里那段 <c>for resp in response.history</c> 是死代码（不跟随重定向时 history 恒为空），
 /// 因此直接登录路径**永远只能拿到 SSO 票据（CASTGC），拿不到教务会话**。
@@ -110,7 +112,8 @@ internal sealed class XauatSsoClient(IHttpClientFactory httpClientFactory, ILogg
             var location = response.Headers.Location;
             if (location is not null)
             {
-                var next = location.IsAbsoluteUri ? location : new Uri(loginPageUrl, location);
+                var next = XauatConstants.SecureAuthServer(
+                    location.IsAbsoluteUri ? location : new Uri(loginPageUrl, location));
                 var special = await DetectSpecialPageAsync(
                     client, jar, next, loginPageUrl, username, cancellationToken);
                 if (special is not null) return special;

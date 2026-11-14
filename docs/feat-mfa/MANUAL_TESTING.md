@@ -248,7 +248,7 @@ $resp.data.cookie
 
 ```powershell
 $Service = "https://zhfwpt.xauat.edu.cn:8080/logCas"
-$target = "http://authserver.xauat.edu.cn/authserver/login?service=" + [uri]::EscapeDataString($Service)
+$target = "https://authserver.xauat.edu.cn/authserver/login?service=" + [uri]::EscapeDataString($Service)
 
 $body = @{
   url = $target
@@ -712,6 +712,7 @@ API **不会自动改密**：改密需要旧密码 + 新密码 + 确认密码，
 | 428 + `20004` | 密码过期 | 浏览器改密后重试 |
 | 429 + `40001` | CAS/MFA 限流、并发或轮询过快 | 按 `Retry-After` 等待 |
 | 502 + `50002` | 上游不可达/协议异常 | 看 `/Logs`；确认网络与 authserver |
+| 生产 502 / 约 30 秒超时，其他 `*.edu.cn` 正常 | 生产出网到 authserver **80 端口**被阻断 | 使用 HTTPS 登录页；2026-11 起代码默认 HTTPS，并自动把发现/回跳链里的 HTTP URL 升级 |
 | 503 + `50004` | Redis 未配置/不可用（交互式挑战） | 配置 `REDIS` 后重启 |
 | 200 + `20003` 但不是最终成功 | 这是 MFA 挑战 | 继续调 `/v1/login/mfa` 或轮询 status |
 | 扫码一直 `pending` | 没扫/二维码过期 | 重新触发 `wechat_qr` |
@@ -844,7 +845,7 @@ API **不会自动改密**：改密需要旧密码 + 新密码 + 确认密码，
     "username": "你的学号",
     "studentId": "你的学号",
     "url": "https://<目标>",
-    "authServerUrl": "http://authserver.xauat.edu.cn/authserver/login?service=...",
+    "authServerUrl": "https://authserver.xauat.edu.cn/authserver/login?service=...",
     "landingUrl": "https://<目标>?ticket=ST-...",
     "cookie": "k=v; k=v",
     "cookies": [

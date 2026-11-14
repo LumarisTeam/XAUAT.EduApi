@@ -103,7 +103,8 @@ internal sealed class UnifiedSsoClient(
                 !Uri.TryCreate(data.LandingUrl, UriKind.Absolute, out var landing)) return null;
             EnsureAllowed(auth);
             EnsureAllowed(landing);
-            return new UnifiedAuthOutcome(true, "登录成功", UnifiedAuthFailure.None, data.AuthServerUrl,
+            return new UnifiedAuthOutcome(true, "登录成功", UnifiedAuthFailure.None,
+                XauatConstants.SecureAuthServer(auth).ToString(),
                 data.LandingUrl, data.LandingCookie, data.Cookies.Select(c => (c.Host, c.Name, c.Value)).ToList());
         }
         catch (JsonException) { return null; }
@@ -123,6 +124,9 @@ internal sealed class UnifiedSsoClient(
 
         try
         {
+            // XAUAT 的 authserver 同时支持 HTTP/HTTPS；生产出网到 80 端口会超时，
+            // 因此发现/回跳时统一升级为 HTTPS。其它学校保持原协议。
+            entry = XauatConstants.SecureAuthServer(entry);
             EnsureAllowed(entry);
 
             var passwordHash = PasswordEncryptor.Sha256Hex(command.Password);
@@ -285,6 +289,7 @@ internal sealed class UnifiedSsoClient(
 
         for (var hop = 0; hop <= MaxRedirects; hop++)
         {
+            current = XauatConstants.SecureAuthServer(current);
             EnsureAllowed(current);
 
             if (!visited.Add(current.ToString()))
@@ -338,6 +343,7 @@ internal sealed class UnifiedSsoClient(
         foreach (var candidate in CasDiscoveryHints.FindCandidates(html))
         {
             if (!Uri.TryCreate(current, candidate, out var uri)) continue;
+            uri = XauatConstants.SecureAuthServer(uri);
             if (uri.Scheme is not ("http" or "https")) continue;
             if (!allowList.IsAllowed(uri.Host)) continue;
             if (visited.Contains(uri.ToString())) continue;
@@ -467,6 +473,7 @@ internal sealed class UnifiedSsoClient(
 
         for (var hop = 0; hop <= MaxRedirects; hop++)
         {
+            current = XauatConstants.SecureAuthServer(current);
             EnsureAllowed(current);
 
             using var request = new HttpRequestMessage(HttpMethod.Get, current);
