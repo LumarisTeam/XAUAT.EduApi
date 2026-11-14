@@ -337,7 +337,8 @@ internal sealed partial class ReAuthHandler(
                     return new QrPollResult(QrPollStatus.Failed, "微信回调未返回重定向");
                 }
 
-                var next = Resolve(callback, callbackResponse.Headers.Location);
+                var next = XauatConstants.SecureAuthServer(
+                    Resolve(callback, callbackResponse.Headers.Location));
                 if (IsReAuthOrImproveInfo(next))
                 {
                     return new QrPollResult(QrPollStatus.Failed, "微信回调后仍需二次认证或改密");
@@ -592,59 +593,91 @@ internal sealed partial class ReAuthHandler(
 
         for (var hop = 0; hop < 6; hop++)
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, current);
-            using var response = await XauatHttpSession.SendAsync(client, request, jar, cancellationToken);
+            // callback / login?service= 可能回跳到 authserver 的 HTTP 地址；生产 80 端口不可达，
+            // 统一升级为 HTTPS（对其它 host 无影响）。
+            current = XauatConstants.SecureAuthServer(current);
 
-            if (IsRedirect(response.StatusCode) && response.Headers.Location is not null)
+            HttpResponseMessage response;
+            try
             {
-                var next = Resolve(current, response.Headers.Location);
+                using var request = new HttpRequestMessage(HttpMethod.Get, current);
+                response = await XauatHttpSession.SendAsync(client, request, jar, cancellationToken);
+            }
+            catch (Exception ex) when (
+                (ex is HttpRequestException ||
+                 (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested)) &&
+                HasTicket(current))
+            {
+                // 已经拿到 ticket，只是落地页（如财务平台 :8080）从生产不可达。
+                // 不要把这种情况变成 500：返回带 ticket 的地址，让调用方自行完成落地。
+                logger.LogWarning(ex,
+                    "二次认证跟票时落地页不可达，返回带 ticket 的地址：{Host}{Path}",
+                    current.Host, current.AbsolutePath);
+                return new ReAuthCompletion(
+                    true,
+                    ReAuthFailure.None,
+                    "登录成功（落地页不可达，已返回 ticket）",
+                    jar.Snapshot(),
+                    current,
+                    authServerLoginUrl);
+            }
 
-                if (IsReAuthOrImproveInfo(next))
+            using (response)
+            {
+                if (IsRedirect(response.StatusCode) && response.Headers.Location is not null)
                 {
-                    return ReAuthCompletion.Fail(
-                        next.AbsolutePath.Contains("/improveInfo/", StringComparison.OrdinalIgnoreCase)
-                            ? ReAuthFailure.PasswordExpired
-                            : ReAuthFailure.Protocol,
-                        "二次认证后仍被要求再次认证");
-                }
+                    var next = Resolve(current, response.Headers.Location);
 
-                if (allowHop is not null && !allowHop(next))
-                {
-                    return ReAuthCompletion.Fail(ReAuthFailure.Protocol, "二次认证后的跳转目标不在允许范围");
-                }
+                    if (IsReAuthOrImproveInfo(next))
+                    {
+                        return ReAuthCompletion.Fail(
+                            next.AbsolutePath.Contains("/improveInfo/", StringComparison.OrdinalIgnoreCase)
+                                ? ReAuthFailure.PasswordExpired
+                                : ReAuthFailure.Protocol,
+                            "二次认证后仍被要求再次认证");
+                    }
 
-                if (next.AbsolutePath.Contains("/authserver/index.do", StringComparison.OrdinalIgnoreCase))
-                {
-                    current = authServerLoginUrl;
+                    if (allowHop is not null && !allowHop(next))
+                    {
+                        return ReAuthCompletion.Fail(ReAuthFailure.Protocol, "二次认证后的跳转目标不在允许范围");
+                    }
+
+                    if (next.AbsolutePath.Contains("/authserver/index.do", StringComparison.OrdinalIgnoreCase))
+                    {
+                        current = authServerLoginUrl;
+                        continue;
+                    }
+
+                    current = next;
                     continue;
                 }
 
-                current = next;
-                continue;
-            }
+                var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (ReAuthPageParser.LooksLikePasswordExpiredHtml(body))
+                {
+                    return ReAuthCompletion.Fail(ReAuthFailure.PasswordExpired, "密码已过期");
+                }
 
-            var body = await response.Content.ReadAsStringAsync(cancellationToken);
-            if (ReAuthPageParser.LooksLikePasswordExpiredHtml(body))
-            {
-                return ReAuthCompletion.Fail(ReAuthFailure.PasswordExpired, "密码已过期");
-            }
+                if (ReAuthPageParser.LooksLikeReAuthHtml(body))
+                {
+                    return ReAuthCompletion.Fail(ReAuthFailure.Protocol, "二次认证后仍返回 re-auth 页");
+                }
 
-            if (ReAuthPageParser.LooksLikeReAuthHtml(body))
-            {
-                return ReAuthCompletion.Fail(ReAuthFailure.Protocol, "二次认证后仍返回 re-auth 页");
+                return new ReAuthCompletion(
+                    true,
+                    ReAuthFailure.None,
+                    "登录成功",
+                    jar.Snapshot(),
+                    current,
+                    authServerLoginUrl);
             }
-
-            return new ReAuthCompletion(
-                true,
-                ReAuthFailure.None,
-                "登录成功",
-                jar.Snapshot(),
-                current,
-                authServerLoginUrl);
         }
 
         return ReAuthCompletion.Fail(ReAuthFailure.Upstream, "二次认证后的跳转次数过多");
     }
+
+    private static bool HasTicket(Uri uri)
+        => uri.Query.Contains("ticket=", StringComparison.OrdinalIgnoreCase);
 
     private Task<ReAuthCompletion> FollowFromAsync(
         Uri start,

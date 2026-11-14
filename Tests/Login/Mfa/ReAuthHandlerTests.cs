@@ -30,7 +30,7 @@ public class ReAuthHandlerTests
             AuthSecure + "/authserver/reAuthCheck/reAuthSubmit.do",
             () => FakeResponses.Json(submitJson));
         http.OnGetStartingWith(
-            AuthBase + "/authserver/login?service=",
+            AuthSecure + "/authserver/login?service=",
             () => FakeResponses.Redirect("https://swjw.xauat.edu.cn/student/sso/login?ticket=ST-1"));
         http.OnGetStartingWith(
             "https://swjw.xauat.edu.cn/student/sso/login",
@@ -182,7 +182,7 @@ public class ReAuthHandlerTests
             () => FakeResponses.Redirect(
                 AuthBase + "/authserver/login?service=https%3A%2F%2Fswjw.xauat.edu.cn%2Fstudent%2Fsso%2Flogin"));
         http.OnGetStartingWith(
-            AuthBase + "/authserver/login?service=",
+            AuthSecure + "/authserver/login?service=",
             () => FakeResponses.Redirect("https://swjw.xauat.edu.cn/student/sso/login?ticket=ST-1"));
         http.OnGetStartingWith(
             "https://swjw.xauat.edu.cn/student/sso/login",
@@ -195,6 +195,37 @@ public class ReAuthHandlerTests
         Assert.Equal(QrPollStatus.Success, result.Status);
         Assert.NotNull(result.Completion);
         Assert.Contains(result.Completion!.Cookies, cookie => cookie.Name == "__pstsid__");
+        Assert.Contains(http.Sent, request =>
+            request.Url.StartsWith(AuthSecure + "/authserver/login?service=", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task PollQr_LandingTimeoutAfterTicket_ReturnsSuccessWithTicketUrl()
+    {
+        var (handler, http) = Create();
+        http.OnGetStartingWith(
+            "https://lp.open.weixin.qq.com/connect/l/qrconnect",
+            () => FakeResponses.Html("window.wx_errcode=405;window.wx_code='CODE123';"));
+        http.OnGetStartingWith(
+            AuthSecure + "/authserver/callback?code=CODE123&state=STATE123",
+            () => FakeResponses.Redirect(
+                AuthBase + "/authserver/login?service=https%3A%2F%2Fzhfwpt.xauat.edu.cn%3A8080%2FlogCas"));
+        http.OnGetStartingWith(
+            AuthSecure + "/authserver/login?service=",
+            () => FakeResponses.Redirect("https://zhfwpt.xauat.edu.cn:8080/logCas?ticket=ST-1"));
+        http.OnGetStartingWith(
+            "https://zhfwpt.xauat.edu.cn:8080/logCas?ticket=",
+            () => throw new TaskCanceledException("simulated landing timeout"));
+
+        var result = await handler.PollQrAsync(
+            new Uri(LoginUrl), "UUID12345", "STATE123", new XauatCookieJar(),
+            Client(http), allowHop: _ => true, cancellationToken: default);
+
+        Assert.Equal(QrPollStatus.Success, result.Status);
+        Assert.NotNull(result.Completion);
+        Assert.Equal(
+            "https://zhfwpt.xauat.edu.cn:8080/logCas?ticket=ST-1",
+            result.Completion!.LandingUrl!.ToString());
     }
 
     [Fact]
