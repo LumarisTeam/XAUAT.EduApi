@@ -1,3 +1,5 @@
+using EduApi.Data.Models;
+
 namespace XAUAT.EduApi.Login.Xauat;
 
 /// <summary>
@@ -12,9 +14,11 @@ internal interface IXauatSsoClient
 {
     /// <summary>用户名密码登录。</summary>
     Task<LoginToken> LoginAsync(
-        string username, string password, XauatCookieJar jar, CancellationToken cancellationToken);
+        string username, string password, XauatCookieJar jar, CancellationToken cancellationToken,
+        MfaRequestOptions? mfa = null);
 
     /// <summary>用 SSO 票据（CASTGC）换取教务系统会话 cookie。</summary>
     Task<LoginToken> ExchangeSsoTicketAsync(
-        string ssoCookie, XauatCookieJar jar, CancellationToken cancellationToken);
+        string ssoCookie, XauatCookieJar jar, CancellationToken cancellationToken,
+        string? username = null);
 }

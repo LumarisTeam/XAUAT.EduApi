@@ -98,6 +98,28 @@ internal static class FakeResponses
         return response;
     }
 
+    public static HttpResponseMessage Json(
+        string json, HttpStatusCode status = HttpStatusCode.OK, params string[] setCookies)
+    {
+        var response = new HttpResponseMessage(status)
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
+        };
+        AddCookies(response, setCookies);
+        return response;
+    }
+
+    public static HttpResponseMessage Binary(
+        byte[] data, string contentType = "image/jpeg", HttpStatusCode status = HttpStatusCode.OK)
+    {
+        var response = new HttpResponseMessage(status)
+        {
+            Content = new ByteArrayContent(data)
+        };
+        response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
+        return response;
+    }
+
     private static void AddCookies(HttpResponseMessage response, string[] setCookies)
     {
         foreach (var cookie in setCookies)

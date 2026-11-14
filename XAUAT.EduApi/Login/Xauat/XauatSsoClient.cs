@@ -1,4 +1,6 @@
 using System.Net;
+using EduApi.Data.Models;
+using XAUAT.EduApi.Login.Mfa;
 
 namespace XAUAT.EduApi.Login.Xauat;
 
@@ -27,7 +29,8 @@ internal sealed class XauatSsoClient(IHttpClientFactory httpClientFactory, ILogg
     /// 用户名密码登录。返回的 <see cref="LoginToken.SsoCookie"/> 可直接用于换教务会话。
     /// </summary>
     public async Task<LoginToken> LoginAsync(
-        string username, string password, XauatCookieJar jar, CancellationToken cancellationToken)
+        string username, string password, XauatCookieJar jar, CancellationToken cancellationToken,
+        MfaRequestOptions? mfa = null)
     {
         var client = httpClientFactory.CreateClient(ClientName);
 
@@ -78,7 +81,8 @@ internal sealed class XauatSsoClient(IHttpClientFactory httpClientFactory, ILogg
 
             using var response = await XauatHttpSession.SendAsync(client, postRequest, jar, cancellationToken);
 
-            return await InterpretLoginResponseAsync(response, jar, cancellationToken);
+            return await InterpretLoginResponseAsync(
+                client, response, jar, new Uri(postUrl), username, cancellationToken);
         }
         catch (TaskCanceledException)
         {
@@ -96,12 +100,22 @@ internal sealed class XauatSsoClient(IHttpClientFactory httpClientFactory, ILogg
     }
 
     private async Task<LoginToken> InterpretLoginResponseAsync(
-        HttpResponseMessage response, XauatCookieJar jar, CancellationToken cancellationToken)
+        HttpClient client, HttpResponseMessage response, XauatCookieJar jar,
+        Uri loginPageUrl, string username, CancellationToken cancellationToken)
     {
         var status = (int)response.StatusCode;
 
         if (status is 301 or 302)
         {
+            var location = response.Headers.Location;
+            if (location is not null)
+            {
+                var next = location.IsAbsoluteUri ? location : new Uri(loginPageUrl, location);
+                var special = await DetectSpecialPageAsync(
+                    client, jar, next, loginPageUrl, username, cancellationToken);
+                if (special is not null) return special;
+            }
+
             // Flask 的 history 循环在此处是死代码（allow_redirects=False），所以 eduCookie 恒为空；
             // 真正有值的是"本次 302 响应自己种下的 cookie"，即 SSO 票据。
             var ssoCookie = XauatCookieJar.ReadResponseCookies(response);
@@ -115,6 +129,17 @@ internal sealed class XauatSsoClient(IHttpClientFactory httpClientFactory, ILogg
 
         if (status == 200)
         {
+            if (ReAuthPageParser.LooksLikeReAuthHtml(body))
+            {
+                var page = ReAuthPageParser.Parse(body);
+                return LoginToken.ReAuth(BuildSeed(loginPageUrl, username, jar, page));
+            }
+
+            if (ReAuthPageParser.LooksLikePasswordExpiredHtml(body))
+            {
+                return LoginToken.PasswordExpired("当前密码已过期，请先修改统一身份认证密码");
+            }
+
             if (body.Contains("退出", StringComparison.Ordinal) ||
                 body.Contains("logout", StringComparison.OrdinalIgnoreCase))
             {
@@ -139,6 +164,53 @@ internal sealed class XauatSsoClient(IHttpClientFactory httpClientFactory, ILogg
             : LoginToken.Failed($"登录失败：未知错误 (HTTP {status})");
     }
 
+    /// <summary>识别 302/200 的 re-auth 页或密码过期页，返回对应 LoginToken。</summary>
+    private async Task<LoginToken?> DetectSpecialPageAsync(
+        HttpClient client, XauatCookieJar jar, Uri next, Uri loginPageUrl,
+        string username, CancellationToken cancellationToken)
+    {
+        if (ReAuthPageParser.IsReAuthUrl(next))
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, next);
+            using var pageResponse = await XauatHttpSession.SendAsync(client, request, jar, cancellationToken);
+            var html = await XauatHttpUtils.ReadTextAsync(pageResponse, logger, cancellationToken);
+            var page = ReAuthPageParser.Parse(html);
+            return LoginToken.ReAuth(BuildSeed(loginPageUrl, username, jar, page));
+        }
+
+        if (ReAuthPageParser.IsPasswordExpiredUrl(next))
+        {
+            return LoginToken.PasswordExpired("当前密码已过期，请先修改统一身份认证密码");
+        }
+
+        return null;
+    }
+
+    private static MfaSeed BuildSeed(
+        Uri loginPageUrl, string username, XauatCookieJar jar, ReAuthPageParams page)
+    {
+        var method = MfaMethods.FromReAuthType(page.ReAuthType);
+        return new MfaSeed
+        {
+            Kind = MfaFlowKind.Standard,
+            Username = username,
+            AuthServerLoginUrl = loginPageUrl.ToString(),
+            Service = page.Service,
+            ReAuthType = page.ReAuthType,
+            Method = MfaMethods.ToApiName(method),
+            EncryptSalt = page.EncryptSalt,
+            IsMultifactor = page.IsMultifactor,
+            IsSleepAccount = page.IsSleepAccount,
+            Hint = page.OtpCodeRequired,
+            Cookies = jar.Snapshot().Select(cookie => new MfaCookie
+            {
+                Host = cookie.Host,
+                Name = cookie.Name,
+                Value = cookie.Value
+            }).ToList()
+        };
+    }
+
     /// <summary>
     /// 用 SSO 票据（CASTGC）换取教务系统会话 cookie。
     /// <para>
@@ -148,7 +220,8 @@ internal sealed class XauatSsoClient(IHttpClientFactory httpClientFactory, ILogg
     /// </para>
     /// </summary>
     public async Task<LoginToken> ExchangeSsoTicketAsync(
-        string ssoCookie, XauatCookieJar jar, CancellationToken cancellationToken)
+        string ssoCookie, XauatCookieJar jar, CancellationToken cancellationToken,
+        string? username = null)
     {
         var client = httpClientFactory.CreateClient(ClientName);
 
@@ -165,6 +238,20 @@ internal sealed class XauatSsoClient(IHttpClientFactory httpClientFactory, ILogg
             var final = responses[^1];
 
             var body = await XauatHttpUtils.ReadTextAsync(final, logger, cancellationToken);
+
+            if (ReAuthPageParser.LooksLikeReAuthHtml(body) ||
+                ReAuthPageParser.IsReAuthUrl(final.RequestMessage?.RequestUri))
+            {
+                var page = ReAuthPageParser.Parse(body);
+                return LoginToken.ReAuth(BuildSeed(new Uri(url), username ?? "", jar, page));
+            }
+
+            if (ReAuthPageParser.LooksLikePasswordExpiredHtml(body) ||
+                ReAuthPageParser.IsPasswordExpiredUrl(final.RequestMessage?.RequestUri))
+            {
+                return LoginToken.PasswordExpired("当前密码已过期，请先修改统一身份认证密码");
+            }
+
             if (final.StatusCode != HttpStatusCode.OK)
             {
                 return LoginToken.Failed($"SSO登录失败：{body}");

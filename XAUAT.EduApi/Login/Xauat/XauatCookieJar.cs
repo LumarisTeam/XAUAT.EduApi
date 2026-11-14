@@ -87,6 +87,16 @@ internal sealed class XauatCookieJar
         }
     }
 
+    /// <summary>从多 host 快照恢复 cookie（MFA 待认证会话用）。</summary>
+    public void Restore(IEnumerable<(string Host, string Name, string Value)> cookies)
+    {
+        foreach (var (host, name, value) in cookies)
+        {
+            if (host.Length == 0 || name.Length == 0) continue;
+            Put(host, name, value);
+        }
+    }
+
     /// <summary>写入一个 cookie；同名同 host 覆盖原值并保留原位置（保序便于与 Flask 的输出对拍）。</summary>
     private void Put(string host, string name, string value)
     {

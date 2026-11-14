@@ -50,6 +50,12 @@ public class LoginController(
     [ProducesResponseType(typeof(string), StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult<LoginResponse>> Login([FromBody] LoginRequest request)
     {
+        var options = new MfaRequestOptions
+        {
+            Method = request.MfaMethod,
+            TrustDevice = request.TrustDevice
+        };
+
         try
         {
             if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.Password))
@@ -62,12 +68,59 @@ public class LoginController(
                 return BadRequest(Message(ApiMessageKey.InvalidLoginMode));
             }
 
+            var hasMfaOptions = !string.IsNullOrWhiteSpace(request.MfaMethod) || !request.TrustDevice;
+
             var result = mode == EduSystemMode.Graduate
-                ? await graduateLoginService.LoginAsync(
-                    request.Username, request.Password, HttpContext.RequestAborted)
-                : await loginService.LoginAsync(request.Username, request.Password, Language);
+                ? hasMfaOptions
+                    ? await graduateLoginService.LoginAsync(
+                        request.Username, request.Password, options, HttpContext.RequestAborted)
+                    : await graduateLoginService.LoginAsync(
+                        request.Username, request.Password, HttpContext.RequestAborted)
+                : hasMfaOptions
+                    ? await loginService.LoginAsync(request.Username, request.Password, options, Language)
+                    : await loginService.LoginAsync(request.Username, request.Password, Language);
 
             return Ok(result);
+        }
+        catch (MfaRequiredException ex)
+        {
+            ex.Challenge.Message = Message(ApiMessageKey.MfaRequired);
+            return Ok(new LoginResponse
+            {
+                Success = false,
+                MfaRequired = true,
+                Mfa = ex.Challenge
+            });
+        }
+        catch (PasswordExpiredException ex)
+        {
+            return StatusCode(StatusCodes.Status428PreconditionRequired, new LoginResponse
+            {
+                Success = false,
+                PasswordExpired = true,
+                PasswordChangeUrl = ex.PasswordChangeUrl
+            });
+        }
+        catch (MfaUnavailableException)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable,
+                Message(ApiMessageKey.MfaUnavailable));
+        }
+        catch (MfaMethodUnsupportedException)
+        {
+            return BadRequest(Message(ApiMessageKey.MfaMethodUnsupported));
+        }
+        catch (MfaFailedException)
+        {
+            return Unauthorized(Message(ApiMessageKey.MfaInvalidCode));
+        }
+        catch (MfaBusyException ex)
+        {
+            return RateLimited(ApiMessageKey.MfaBusy, ex.RetryAfterSeconds);
+        }
+        catch (MfaSessionExpiredException)
+        {
+            return StatusCode(StatusCodes.Status410Gone, Message(ApiMessageKey.MfaSessionExpired));
         }
         catch (LoginFailedException)
         {

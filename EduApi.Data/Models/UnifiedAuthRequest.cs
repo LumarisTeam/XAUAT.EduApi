@@ -24,4 +24,10 @@ public class UnifiedAuthRequest
 
     /// <summary>统一认证密码。仅在内存与发往认证服务器的表单里出现，不落日志、不落缓存。</summary>
     public string Password { get; set; } = "";
+
+    /// <summary>期望的二次认证方式；null/auto 使用 authserver 页面默认值。</summary>
+    public string? MfaMethod { get; set; }
+
+    /// <summary>是否信任此设备（skipTmpReAuth）；默认 true。</summary>
+    public bool TrustDevice { get; set; } = true;
 }

@@ -1,3 +1,4 @@
+using EduApi.Data.Models;
 using XAUAT.EduApi.Login.Xauat;
 
 namespace XAUAT.EduApi.Tests.Login.TestSupport;
@@ -28,7 +29,8 @@ internal sealed class FakeSsoClient : IXauatSsoClient
     public (string Username, string Password)? LastLoginCredentials { get; private set; }
 
     public Task<LoginToken> LoginAsync(
-        string username, string password, XauatCookieJar jar, CancellationToken cancellationToken)
+        string username, string password, XauatCookieJar jar, CancellationToken cancellationToken,
+        MfaRequestOptions? mfa = null)
     {
         LoginCallCount++;
         LastLoginCredentials = (username, password);
@@ -36,7 +38,8 @@ internal sealed class FakeSsoClient : IXauatSsoClient
     }
 
     public Task<LoginToken> ExchangeSsoTicketAsync(
-        string ssoCookie, XauatCookieJar jar, CancellationToken cancellationToken)
+        string ssoCookie, XauatCookieJar jar, CancellationToken cancellationToken,
+        string? username = null)
     {
         ExchangeCallCount++;
         return Task.FromResult(ExchangeResult);

@@ -1,8 +1,17 @@
+using XAUAT.EduApi.Login.Mfa;
+
 namespace XAUAT.EduApi.Login.Unified;
 
 /// <summary>一次通用统一身份认证的入参。</summary>
 /// <param name="EntryUrl">受认证保护的目标地址（调用方给的原始字符串）。</param>
-internal sealed record UnifiedAuthCommand(string EntryUrl, string Username, string Password);
+internal sealed record UnifiedAuthCommand(string EntryUrl, string Username, string Password)
+{
+    /// <summary>期望的二次认证方式；null/auto 使用页面默认值。</summary>
+    public string? MfaMethod { get; init; }
+
+    /// <summary>是否信任此设备（skipTmpReAuth）；默认 true。</summary>
+    public bool TrustDevice { get; init; } = true;
+}
 
 /// <summary>失败归类，决定控制器回哪个状态码。</summary>
 internal enum UnifiedAuthFailure
@@ -20,7 +29,16 @@ internal enum UnifiedAuthFailure
     BlockedTarget,
 
     /// <summary>网络不通、上游 5xx、响应无法解析 → 502。</summary>
-    Upstream
+    Upstream,
+
+    /// <summary>需要二次认证 → 200 + 20003。</summary>
+    MfaRequired,
+
+    /// <summary>统一身份认证密码已过期 → 428 + 20004。</summary>
+    PasswordExpired,
+
+    /// <summary>交互式二次认证不可用（如 Redis 不可用）→ 503。</summary>
+    MfaUnavailable
 }
 
 /// <summary>
@@ -40,10 +58,12 @@ internal sealed record UnifiedAuthOutcome(
     string? AuthServerUrl = null,
     string? LandingUrl = null,
     string? LandingCookie = null,
-    IReadOnlyList<(string Host, string Name, string Value)>? Cookies = null)
+    IReadOnlyList<(string Host, string Name, string Value)>? Cookies = null,
+    MfaSeed? Mfa = null)
 {
-    public static UnifiedAuthOutcome Fail(UnifiedAuthFailure failure, string message)
-        => new(false, message, failure);
+    public static UnifiedAuthOutcome Fail(
+        UnifiedAuthFailure failure, string message, MfaSeed? mfa = null)
+        => new(false, message, failure, Mfa: mfa);
 }
 
 /// <summary>

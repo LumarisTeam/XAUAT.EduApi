@@ -69,6 +69,24 @@ internal sealed class FakeLoginRedisStore : ILoginRedisStore
         return Task.FromResult(true);
     }
 
+    public Task<bool> SetIfNotExistsAsync(string key, string value, TimeSpan ttl)
+    {
+        Operations.Add($"SETNX {key} ttl={ttl}");
+        if (_strings.ContainsKey(key)) return Task.FromResult(false);
+        _strings[key] = value;
+        _ttls[key] = ttl;
+        return Task.FromResult(true);
+    }
+
+    public Task<string?> GetDeleteAsync(string key)
+    {
+        Operations.Add($"GETDEL {key}");
+        if (!_strings.TryGetValue(key, out var value)) return Task.FromResult<string?>(null);
+        _strings.Remove(key);
+        _ttls.Remove(key);
+        return Task.FromResult<string?>(value);
+    }
+
     public Task<long> IncrementAsync(string key)
     {
         Operations.Add($"INCR {key}");

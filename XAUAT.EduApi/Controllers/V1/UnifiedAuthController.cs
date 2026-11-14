@@ -59,6 +59,62 @@ public class UnifiedAuthController(
             logger.LogWarning("通用统一认证请求被拒：{Detail}", ex.Message);
             return BadRequest(ErrorResponse(ApiCodes.ParamError, Message(ex.MessageKey)));
         }
+        catch (MfaRequiredException ex)
+        {
+            ex.Challenge.Message = Message(ApiMessageKey.MfaRequired);
+            return Ok(new ApiResponse<UnifiedAuthResponse>
+            {
+                Data = new UnifiedAuthResponse
+                {
+                    Username = request.Username,
+                    StudentId = request.Username,
+                    Url = request.Url,
+                    MfaRequired = true,
+                    Mfa = ex.Challenge
+                },
+                Code = ApiCodes.MfaRequired,
+                Message = Message(ApiMessageKey.MfaRequired)
+            });
+        }
+        catch (PasswordExpiredException ex)
+        {
+            return StatusCode(StatusCodes.Status428PreconditionRequired, new ApiResponse<UnifiedAuthResponse>
+            {
+                Data = new UnifiedAuthResponse
+                {
+                    Username = request.Username,
+                    StudentId = request.Username,
+                    Url = request.Url,
+                    PasswordExpired = true,
+                    PasswordChangeUrl = ex.PasswordChangeUrl
+                },
+                Code = ApiCodes.PasswordExpired,
+                Message = Message(ApiMessageKey.PasswordExpired)
+            });
+        }
+        catch (MfaUnavailableException)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable,
+                ErrorResponse(ApiCodes.MfaUnavailable, Message(ApiMessageKey.MfaUnavailable)));
+        }
+        catch (MfaMethodUnsupportedException)
+        {
+            return BadRequest(ErrorResponse(ApiCodes.MfaMethodUnsupported,
+                Message(ApiMessageKey.MfaMethodUnsupported)));
+        }
+        catch (MfaFailedException)
+        {
+            return Unauthorized(ErrorResponse(ApiCodes.MfaInvalidCode, Message(ApiMessageKey.MfaInvalidCode)));
+        }
+        catch (MfaBusyException ex)
+        {
+            return RateLimited(ApiMessageKey.MfaBusy, ex.RetryAfterSeconds);
+        }
+        catch (MfaSessionExpiredException)
+        {
+            return StatusCode(StatusCodes.Status410Gone,
+                ErrorResponse(ApiCodes.MfaSessionExpired, Message(ApiMessageKey.MfaSessionExpired)));
+        }
         catch (LoginFailedException ex)
         {
             logger.LogWarning("通用统一认证凭据错误：{Message}", ex.Message);

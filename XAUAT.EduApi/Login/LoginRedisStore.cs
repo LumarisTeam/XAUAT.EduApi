@@ -82,6 +82,35 @@ internal sealed class LoginRedisStore : ILoginRedisStore
         }
     }
 
+    public async Task<bool> SetIfNotExistsAsync(string key, string value, TimeSpan ttl)
+    {
+        if (_database is null) return false;
+        try
+        {
+            return await _database.StringSetAsync(key, value, ttl, When.NotExists);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "SET NX Redis 键 {Key} 失败", key);
+            return false;
+        }
+    }
+
+    public async Task<string?> GetDeleteAsync(string key)
+    {
+        if (_database is null) return null;
+        try
+        {
+            var value = await _database.StringGetDeleteAsync(key);
+            return value.IsNull ? null : (string?)value;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "GETDEL Redis 键 {Key} 失败", key);
+            return null;
+        }
+    }
+
     public async Task<long> IncrementAsync(string key)
     {
         if (_database is null) return 0;

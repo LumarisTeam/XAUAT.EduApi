@@ -15,4 +15,9 @@ public interface IGraduateLoginService
     /// <exception cref="HttpRequestException">认证服务器或研究生系统不可达 → 502。</exception>
     Task<LoginResponse> LoginAsync(
         string username, string password, CancellationToken cancellationToken = default);
+
+    /// <summary>带二次认证选项的登录；交互式 MFA 会抛出 <see cref="Exceptions.MfaRequiredException"/>。</summary>
+    Task<LoginResponse> LoginAsync(
+        string username, string password, MfaRequestOptions options,
+        CancellationToken cancellationToken = default);
 }
