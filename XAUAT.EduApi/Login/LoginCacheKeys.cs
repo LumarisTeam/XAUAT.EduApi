@@ -36,6 +36,13 @@ public static class LoginCacheKeys
     public static string LoginFailed(string username, string passwordHash)
         => $"login-failed-{username}-{passwordHash}";
 
+    /// <summary>
+    /// 密码过期标记。key 含密码哈希：用户改密后哈希变化，旧标记不可达；
+    /// 使用同一旧密码的缓存查询会先检查该标记。
+    /// </summary>
+    public static string PasswordExpired(string username, string passwordHash)
+        => $"security:password_expired:{username}:{passwordHash}";
+
     /// <summary>当前学期 id，全局单键（Flask 如此，不按用户区分）。</summary>
     public const string CurrentSemester = "current_semester";
 
@@ -94,6 +101,9 @@ public static class LoginCacheTtl
 
     /// <summary>限流事件 ZSET 保留时长，Flask 取 <c>max(window, ban)</c> = 86400s。</summary>
     public static readonly TimeSpan RateLimitEvents = TimeSpan.FromSeconds(86400);
+
+    /// <summary>密码过期标记：24 小时；用户改密后新密码哈希自然绕过。</summary>
+    public static readonly TimeSpan PasswordExpired = TimeSpan.FromHours(24);
 
     /// <summary>
     /// <c>security:ban_logs</c> 的长度上限。

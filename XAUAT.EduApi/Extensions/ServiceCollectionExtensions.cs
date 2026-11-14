@@ -15,6 +15,7 @@ using XAUAT.EduApi.Filters;
 using XAUAT.EduApi.Interfaces;
 using XAUAT.EduApi.Localization;
 using XAUAT.EduApi.Login;
+using XAUAT.EduApi.Login.Mfa;
 using XAUAT.EduApi.Login.Unified;
 using XAUAT.EduApi.Login.Xauat;
 using XAUAT.EduApi.Queues;
@@ -198,6 +199,15 @@ public static class ServiceCollectionExtensions
             services.AddSingleton<StatisticsService>();
             services.AddSingleton<SsoAuthService>();
 
+            // 二次认证：pending session 存 Redis；ReAuthHandler/协调器无状态，注册为单例。
+            services.AddSingleton<IMfaSessionStore, MfaSessionStore>();
+            services.AddSingleton<ReAuthHandler>();
+            services.AddSingleton<MfaChallengeCoordinator>();
+            services.AddSingleton<IMfaChallengeCoordinator>(sp =>
+                sp.GetRequiredService<MfaChallengeCoordinator>());
+            services.AddScoped<MfaLoginService>();
+            services.AddScoped<IMfaLoginService>(sp => sp.GetRequiredService<MfaLoginService>());
+
             // 认证服务器客户端。**必须**关掉自动重定向与自动 cookie 管理：
             //   关自动重定向 —— 换票逻辑靠"逐跳捕获 Set-Cookie"（教务会话种在跳转链第 2 跳），
             //                    自动跟随会把中间响应丢掉，表现为所有人登录都报"未能获取有效会话"；
@@ -283,6 +293,25 @@ public static class ServiceCollectionExtensions
 
             services.AddSingleton<IUnifiedSsoClient, UnifiedSsoClient>();
             services.AddScoped<IUnifiedAuthService, UnifiedAuthService>();
+
+            // 微信扫码专用客户端：只访问硬编码的微信域名，不携带 authserver cookie。
+            // 长轮询需要更长的超时；同样关自动重定向/cookie/代理，并保留建连前的内网地址闸门。
+            services.AddHttpClient(MfaQrClient.Name)
+                .ConfigureHttpClient(client =>
+                {
+                    client.Timeout = TimeSpan.FromSeconds(35);
+                    client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", XauatConstants.UserAgent);
+                    client.DefaultRequestHeaders.TryAddWithoutValidation("Accept", "*/*");
+                })
+                .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+                {
+                    AllowAutoRedirect = false,
+                    UseCookies = false,
+                    UseProxy = false,
+                    AutomaticDecompression = DecompressionMethods.All,
+                    PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+                    ConnectCallback = UnifiedConnectGuard.ConnectAsync
+                });
 
             return services;
         }

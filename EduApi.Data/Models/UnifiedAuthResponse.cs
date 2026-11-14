@@ -31,6 +31,18 @@ public class UnifiedAuthResponse
 
     /// <summary>整条跳转链上的全部 cookie（按写入顺序，跨 host）。</summary>
     public List<UnifiedAuthCookie> Cookies { get; set; } = [];
+
+    /// <summary>需要二次认证；此时 <see cref="Mfa"/> 非空，调用方应走 /v1/login/mfa。</summary>
+    public bool MfaRequired { get; set; }
+
+    /// <summary>二次认证挑战信息。</summary>
+    public MfaChallenge? Mfa { get; set; }
+
+    /// <summary>统一身份认证密码已过期，需用户自行改密。</summary>
+    public bool PasswordExpired { get; set; }
+
+    /// <summary>改密页面地址（浏览器打开）。</summary>
+    public string? PasswordChangeUrl { get; set; }
 }
 
 /// <summary>单个 cookie 及其归属 host。</summary>

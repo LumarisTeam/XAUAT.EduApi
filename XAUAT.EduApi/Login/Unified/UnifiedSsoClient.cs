@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.Json;
 using XAUAT.EduApi.Exceptions;
 using XAUAT.EduApi.Localization;
+using XAUAT.EduApi.Login.Mfa;
 using XAUAT.EduApi.Login.Xauat;
 
 namespace XAUAT.EduApi.Login.Unified;
@@ -62,6 +63,14 @@ internal sealed class UnifiedSsoClient(
         if (!Uri.TryCreate(command.EntryUrl, UriKind.Absolute, out var target))
             throw new UnifiedAuthRequestException(ApiMessageKey.UnifiedAuthInvalidTarget, "目标地址不是合法的绝对 URL");
         EnsureAllowed(target);
+        var passwordHash = PasswordEncryptor.Sha256Hex(command.Password);
+        if (redis?.IsAvailable == true &&
+            await redis.GetStringAsync(LoginCacheKeys.PasswordExpired(command.Username, passwordHash)) is { Length: > 0 })
+        {
+            return UnifiedAuthOutcome.Fail(
+                UnifiedAuthFailure.PasswordExpired, "当前密码已过期，请先修改统一身份认证密码");
+        }
+
         var targetKey = CacheKey("session", command.EntryUrl, command.Username, command.Password);
         var stripe = _locks[(int)(Convert.ToUInt32(targetKey[^8..], 16) % (uint)_locks.Length)];
         await stripe.WaitAsync(cancellationToken);
@@ -116,6 +125,14 @@ internal sealed class UnifiedSsoClient(
         {
             EnsureAllowed(entry);
 
+            var passwordHash = PasswordEncryptor.Sha256Hex(command.Password);
+            if (redis?.IsAvailable == true &&
+                await redis.GetStringAsync(LoginCacheKeys.PasswordExpired(command.Username, passwordHash)) is { Length: > 0 })
+            {
+                return UnifiedAuthOutcome.Fail(
+                    UnifiedAuthFailure.PasswordExpired, "当前密码已过期，请先修改统一身份认证密码");
+            }
+
             var loginPage = await DiscoverLoginPageAsync(client, jar, entry, cancellationToken);
             if (loginPage is null)
             {
@@ -124,6 +141,7 @@ internal sealed class UnifiedSsoClient(
             }
 
             // 认证服务器由可信的逐跳发现得到；票据按认证源、账号和密码隔离。
+            var sessionKey = CacheKey("session", command.EntryUrl, command.Username, command.Password);
             var ticketKey = CacheKey("ticket", loginPage.Url.GetLeftPart(UriPartial.Authority).ToLowerInvariant(),
                 command.Username, command.Password);
             if (redis?.IsAvailable == true && await redis.GetStringAsync(ticketKey) is { Length: > 0 } ticket)
@@ -134,7 +152,7 @@ internal sealed class UnifiedSsoClient(
                 if (IsRedirect(exchangeResponse.StatusCode) && exchangeResponse.Headers.Location is not null)
                 {
                     var exchanged = await FollowBackAsync(client, jar, Resolve(loginPage.Url, exchangeResponse.Headers.Location),
-                        loginPage.Url, cancellationToken);
+                        loginPage.Url, command, sessionKey, ticketKey, cancellationToken);
                     if (exchanged.Success)
                     {
                         await SaveTicketAsync(ticketKey, exchanged, loginPage.Url.Host);
@@ -163,7 +181,8 @@ internal sealed class UnifiedSsoClient(
             if (casGuard is not null && await casGuard.AcquireAsync(loginPage.Url.Host, command.Username) is { } retry)
                 throw new RateLimitException(retry);
 
-            var result = await SubmitCredentialsAsync(client, jar, loginPage, form, cancellationToken);
+            var result = await SubmitCredentialsAsync(
+                client, jar, loginPage, form, command, sessionKey, ticketKey, cancellationToken);
             if (result.Success) await SaveTicketAsync(ticketKey, result, loginPage.Url.Host);
             return result;
         }
@@ -207,6 +226,38 @@ internal sealed class UnifiedSsoClient(
         var ticket = outcome.Cookies?.LastOrDefault(c =>
             string.Equals(c.Host, host, StringComparison.OrdinalIgnoreCase) && c.Name == "CASTGC").Value;
         if (!string.IsNullOrWhiteSpace(ticket)) await redis.SetStringAsync(key, ticket, TicketCacheTtl);
+    }
+
+    /// <summary>二次认证完成后写入通用链路的短期会话/票据缓存。</summary>
+    internal static async Task CacheReAuthOutcomeAsync(
+        ILoginRedisStore redis,
+        string? sessionKey,
+        string? ticketKey,
+        string authServerUrl,
+        string landingUrl,
+        string landingCookie,
+        IReadOnlyList<(string Host, string Name, string Value)> cookies)
+    {
+        if (!redis.IsAvailable) return;
+
+        if (!string.IsNullOrWhiteSpace(sessionKey))
+        {
+            var data = new CachedOutcome(
+                authServerUrl,
+                landingUrl,
+                landingCookie,
+                cookies.Select(cookie => new CachedCookie(cookie.Host, cookie.Name, cookie.Value)).ToList());
+            await redis.SetStringAsync(sessionKey, JsonSerializer.Serialize(data), TargetCacheTtl);
+        }
+
+        if (!string.IsNullOrWhiteSpace(ticketKey))
+        {
+            var ticket = cookies.FirstOrDefault(cookie => cookie.Name == "CASTGC").Value;
+            if (!string.IsNullOrWhiteSpace(ticket))
+            {
+                await redis.SetStringAsync(ticketKey, ticket, TicketCacheTtl);
+            }
+        }
     }
 
     // ================================================================ 阶段 1：发现登录页
@@ -301,7 +352,8 @@ internal sealed class UnifiedSsoClient(
 
     private async Task<UnifiedAuthOutcome> SubmitCredentialsAsync(
         HttpClient client, XauatCookieJar jar, DiscoveredLoginPage loginPage,
-        Dictionary<string, string> form, CancellationToken cancellationToken)
+        Dictionary<string, string> form, UnifiedAuthCommand command,
+        string sessionKey, string ticketKey, CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, loginPage.Url)
         {
@@ -318,10 +370,27 @@ internal sealed class UnifiedSsoClient(
             // 认证成功后 CAS 会 302 回 service，并把 ticket 拼在 Location 上。
             // 票据（CASTGC）已经在上面的 SendAsync 里进了罐，这里只管顺路跳回去。
             var next = Resolve(loginPage.Url, response.Headers.Location);
-            return await FollowBackAsync(client, jar, next, loginPage.Url, cancellationToken);
+            var special = await DetectSpecialPageAsync(
+                client, jar, next, loginPage.Url, command, sessionKey, ticketKey, cancellationToken);
+            if (special is not null) return special;
+            return await FollowBackAsync(
+                client, jar, next, loginPage.Url, command, sessionKey, ticketKey, cancellationToken);
         }
 
         var html = await XauatHttpUtils.ReadTextAsync(response, logger, cancellationToken);
+
+        if (ReAuthPageParser.LooksLikeReAuthHtml(html))
+        {
+            var page = ReAuthPageParser.Parse(html);
+            return UnifiedAuthOutcome.Fail(UnifiedAuthFailure.MfaRequired, "需要二次认证",
+                mfa: BuildSeed(command, loginPage.Url, jar, page, sessionKey, ticketKey));
+        }
+
+        if (ReAuthPageParser.LooksLikePasswordExpiredHtml(html))
+        {
+            return UnifiedAuthOutcome.Fail(UnifiedAuthFailure.PasswordExpired,
+                "当前密码已过期，请先修改统一身份认证密码");
+        }
 
         if (status == 200 && LooksLoggedIn(html))
         {
@@ -332,11 +401,67 @@ internal sealed class UnifiedSsoClient(
         return InvalidCredentials(XauatHtmlParser.ParseMessageSpan(html));
     }
 
+    /// <summary>识别 302/200 的 re-auth 页或密码过期页。</summary>
+    private async Task<UnifiedAuthOutcome?> DetectSpecialPageAsync(
+        HttpClient client, XauatCookieJar jar, Uri next, Uri loginUrl,
+        UnifiedAuthCommand command, string sessionKey, string ticketKey,
+        CancellationToken cancellationToken)
+    {
+        if (ReAuthPageParser.IsReAuthUrl(next))
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, next);
+            using var response = await XauatHttpSession.SendAsync(client, request, jar, cancellationToken);
+            var html = await XauatHttpUtils.ReadTextAsync(response, logger, cancellationToken);
+            var page = ReAuthPageParser.Parse(html);
+            return UnifiedAuthOutcome.Fail(UnifiedAuthFailure.MfaRequired, "需要二次认证",
+                mfa: BuildSeed(command, loginUrl, jar, page, sessionKey, ticketKey));
+        }
+
+        if (ReAuthPageParser.IsPasswordExpiredUrl(next))
+        {
+            return UnifiedAuthOutcome.Fail(UnifiedAuthFailure.PasswordExpired,
+                "当前密码已过期，请先修改统一身份认证密码");
+        }
+
+        return null;
+    }
+
+    private static MfaSeed BuildSeed(
+        UnifiedAuthCommand command, Uri loginUrl, XauatCookieJar jar,
+        ReAuthPageParams page, string sessionKey, string ticketKey)
+    {
+        var method = MfaMethods.FromReAuthType(page.ReAuthType);
+        return new MfaSeed
+        {
+            Kind = MfaFlowKind.Unified,
+            Username = command.Username,
+            AuthServerLoginUrl = loginUrl.ToString(),
+            Service = page.Service,
+            ReAuthType = page.ReAuthType,
+            Method = MfaMethods.ToApiName(method),
+            EncryptSalt = page.EncryptSalt,
+            IsMultifactor = page.IsMultifactor,
+            IsSleepAccount = page.IsSleepAccount,
+            Hint = page.OtpCodeRequired,
+            Cookies = jar.Snapshot().Select(cookie => new MfaCookie
+            {
+                Host = cookie.Host,
+                Name = cookie.Name,
+                Value = cookie.Value
+            }).ToList(),
+            EntryUrl = command.EntryUrl,
+            SessionCacheKey = sessionKey,
+            TicketCacheKey = ticketKey
+        };
+    }
+
     /// <summary>
     /// 跟完 CAS 跳回目标站点的每一跳，逐跳收 cookie。
     /// </summary>
     private async Task<UnifiedAuthOutcome> FollowBackAsync(
-        HttpClient client, XauatCookieJar jar, Uri start, Uri loginUrl, CancellationToken cancellationToken)
+        HttpClient client, XauatCookieJar jar, Uri start, Uri loginUrl,
+        UnifiedAuthCommand command, string sessionKey, string ticketKey,
+        CancellationToken cancellationToken)
     {
         var current = start;
 
@@ -355,6 +480,21 @@ internal sealed class UnifiedSsoClient(
             }
 
             var html = await XauatHttpUtils.ReadTextAsync(response, logger, cancellationToken);
+
+            if (ReAuthPageParser.LooksLikeReAuthHtml(html) ||
+                ReAuthPageParser.IsReAuthUrl(current))
+            {
+                var page = ReAuthPageParser.Parse(html);
+                return UnifiedAuthOutcome.Fail(UnifiedAuthFailure.MfaRequired, "需要二次认证",
+                    mfa: BuildSeed(command, loginUrl, jar, page, sessionKey, ticketKey));
+            }
+
+            if (ReAuthPageParser.LooksLikePasswordExpiredHtml(html) ||
+                ReAuthPageParser.IsPasswordExpiredUrl(current))
+            {
+                return UnifiedAuthOutcome.Fail(UnifiedAuthFailure.PasswordExpired,
+                    "当前密码已过期，请先修改统一身份认证密码");
+            }
 
             // 又被弹回登录页 = ticket 没被认（多为密码错后的错误页转发），按凭据错误处理
             if (LooksLikeLoginPage(html))

@@ -2,6 +2,8 @@ using EduApi.Data.Models;
 using XAUAT.EduApi.Exceptions;
 using XAUAT.EduApi.Interfaces;
 using XAUAT.EduApi.Localization;
+using XAUAT.EduApi.Login.Mfa;
+using XAUAT.EduApi.Login.Xauat;
 
 namespace XAUAT.EduApi.Login.Unified;
 
@@ -19,7 +21,9 @@ namespace XAUAT.EduApi.Login.Unified;
 internal sealed class UnifiedAuthService(
     IUnifiedSsoClient ssoClient,
     HostAllowList allowList,
-    ILogger<UnifiedAuthService> logger) : IUnifiedAuthService
+    ILogger<UnifiedAuthService> logger,
+    IMfaChallengeCoordinator? mfaCoordinator = null,
+    ILoginRedisStore? redis = null) : IUnifiedAuthService
 {
     /// <summary>白名单被配成"全部放开"只警告一次，避免每个请求刷一行日志。</summary>
     private static int _allowAnyWarned;
@@ -50,20 +54,35 @@ internal sealed class UnifiedAuthService(
         logger.LogInformation("通用统一认证请求：目标 {Host}，学号 {Username}", target.Host, request.Username);
 
         var outcome = await ssoClient.LoginAsync(
-            new UnifiedAuthCommand(request.Url, request.Username, request.Password), cancellationToken);
+            new UnifiedAuthCommand(request.Url, request.Username, request.Password)
+            {
+                MfaMethod = request.MfaMethod,
+                TrustDevice = request.TrustDevice
+            }, cancellationToken);
 
         if (!outcome.Success)
         {
             logger.LogWarning("通用统一认证失败（{Failure}）：{Message}", outcome.Failure, outcome.Message);
-            throw outcome.Failure switch
+            switch (outcome.Failure)
             {
-                UnifiedAuthFailure.NotCasProtected => new UnifiedAuthRequestException(
-                    ApiMessageKey.UnifiedAuthNotCasProtected, outcome.Message),
-                UnifiedAuthFailure.BlockedTarget => new UnifiedAuthRequestException(
-                    ApiMessageKey.UnifiedAuthBlockedTarget, outcome.Message),
-                UnifiedAuthFailure.InvalidCredentials => new LoginFailedException(outcome.Message),
-                _ => new HttpRequestException(outcome.Message)
-            };
+                case UnifiedAuthFailure.MfaRequired:
+                    return await HandleMfaAsync(outcome, request, cancellationToken);
+                case UnifiedAuthFailure.PasswordExpired:
+                    await MarkPasswordExpiredAsync(request);
+                    throw new PasswordExpiredException(ReAuthPageParser.PasswordChangeUrl);
+                case UnifiedAuthFailure.MfaUnavailable:
+                    throw new MfaUnavailableException();
+                case UnifiedAuthFailure.NotCasProtected:
+                    throw new UnifiedAuthRequestException(
+                        ApiMessageKey.UnifiedAuthNotCasProtected, outcome.Message);
+                case UnifiedAuthFailure.BlockedTarget:
+                    throw new UnifiedAuthRequestException(
+                        ApiMessageKey.UnifiedAuthBlockedTarget, outcome.Message);
+                case UnifiedAuthFailure.InvalidCredentials:
+                    throw new LoginFailedException(outcome.Message);
+                default:
+                    throw new HttpRequestException(outcome.Message);
+            }
         }
 
         return new UnifiedAuthResponse
@@ -83,6 +102,89 @@ internal sealed class UnifiedAuthService(
             }).ToList()
         };
     }
+
+    private async Task<UnifiedAuthResponse> HandleMfaAsync(
+        UnifiedAuthOutcome outcome, UnifiedAuthRequest request, CancellationToken cancellationToken)
+    {
+        if (outcome.Mfa is null || mfaCoordinator is null)
+        {
+            throw new MfaUnavailableException();
+        }
+
+        var options = new MfaRequestOptions
+        {
+            Method = request.MfaMethod,
+            TrustDevice = request.TrustDevice
+        };
+
+        var mfa = await mfaCoordinator.StartAsync(
+            outcome.Mfa,
+            options,
+            request.Password,
+            PasswordEncryptor.Sha256Hex(request.Password),
+            cancellationToken);
+
+        if (mfa.Completed && mfa.Completion is not null)
+        {
+            var completion = mfa.Completion;
+            var landing = completion.LandingUrl
+                          ?? throw new MfaFailedException("二次认证完成但未获取落地页");
+
+            var landingCookie = string.Join("; ", completion.Cookies
+                .Where(cookie => HostMatches(cookie.Host, landing.Host))
+                .Select(cookie => $"{cookie.Name}={cookie.Value}"));
+
+            return new UnifiedAuthResponse
+            {
+                Username = request.Username,
+                StudentId = request.Username,
+                Url = request.Url,
+                AuthServerUrl = completion.AuthServerUrl?.ToString() ?? outcome.AuthServerUrl ?? "",
+                LandingUrl = landing.ToString(),
+                Cookie = landingCookie,
+                Cookies = completion.Cookies.Select(cookie => new UnifiedAuthCookie
+                {
+                    Host = cookie.Host,
+                    Name = cookie.Name,
+                    Value = cookie.Value
+                }).ToList()
+            };
+        }
+
+        if (mfa.Challenge is not null)
+        {
+            throw new MfaRequiredException(mfa.Challenge);
+        }
+
+        if (mfa.Failure == ReAuthStartFailure.PasswordExpired)
+        {
+            await MarkPasswordExpiredAsync(request);
+            throw new PasswordExpiredException(ReAuthPageParser.PasswordChangeUrl);
+        }
+
+        if (mfa.Failure == ReAuthStartFailure.MethodUnsupported)
+        {
+            throw new MfaMethodUnsupportedException(mfa.Message ?? "不支持的二次认证方式");
+        }
+
+        logger.LogWarning("MFA 启动/完成失败：failure={Failure} message={Message}",
+            mfa.Failure, mfa.Message);
+        throw new MfaUnavailableException();
+    }
+
+    private async Task MarkPasswordExpiredAsync(UnifiedAuthRequest request)
+    {
+        if (redis?.IsAvailable != true) return;
+        await redis.SetStringAsync(
+            LoginCacheKeys.PasswordExpired(
+                request.Username, PasswordEncryptor.Sha256Hex(request.Password)),
+            "1",
+            LoginCacheTtl.PasswordExpired);
+    }
+
+    private static bool HostMatches(string cookieHost, string host)
+        => string.Equals(cookieHost, host, StringComparison.OrdinalIgnoreCase) ||
+           (cookieHost.StartsWith('.') && host.EndsWith(cookieHost, StringComparison.OrdinalIgnoreCase));
 
     private void WarnIfAllowAny()
     {

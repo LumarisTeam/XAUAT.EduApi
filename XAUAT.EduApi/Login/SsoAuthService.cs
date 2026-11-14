@@ -1,6 +1,20 @@
+using EduApi.Data.Models;
+using XAUAT.EduApi.Login.Mfa;
 using XAUAT.EduApi.Login.Xauat;
 
 namespace XAUAT.EduApi.Login;
+
+internal enum SsoAuthFailureKind
+{
+    None,
+    InvalidCredentials,
+    MfaRequired,
+    MfaUnavailable,
+    MfaMethodUnsupported,
+    PasswordExpired,
+    Banned,
+    RateLimited
+}
 
 /// <summary>登录结果，对应 Flask <c>xauat_login.login</c> 返回的那个 dict。</summary>
 /// <param name="Success">是否成功。</param>
@@ -15,13 +29,29 @@ internal sealed record SsoAuthResult(
     string? Cookies = null,
     bool Banned = false,
     string? BanReason = null,
-    long? BanUntil = null)
+    long? BanUntil = null,
+    SsoAuthFailureKind Failure = SsoAuthFailureKind.None,
+    MfaChallenge? Mfa = null)
 {
     public static SsoAuthResult Ok(string cookies) => new(true, "", cookies);
-    public static SsoAuthResult Fail(string message) => new(false, message);
+    public static SsoAuthResult Fail(string message)
+        => new(false, message, Failure: SsoAuthFailureKind.InvalidCredentials);
 
     public static SsoAuthResult Ban(string message, string? reason, long? until)
-        => new(false, message, Banned: true, BanReason: reason, BanUntil: until);
+        => new(false, message, Banned: true, BanReason: reason, BanUntil: until,
+            Failure: SsoAuthFailureKind.Banned);
+
+    public static SsoAuthResult MfaRequired(MfaChallenge challenge)
+        => new(false, challenge.Message, Failure: SsoAuthFailureKind.MfaRequired, Mfa: challenge);
+
+    public static SsoAuthResult MfaUnavailable(string message)
+        => new(false, message, Failure: SsoAuthFailureKind.MfaUnavailable);
+
+    public static SsoAuthResult MfaMethodUnsupported(string message)
+        => new(false, message, Failure: SsoAuthFailureKind.MfaMethodUnsupported);
+
+    public static SsoAuthResult PasswordExpired(string message)
+        => new(false, message, Failure: SsoAuthFailureKind.PasswordExpired);
 }
 
 /// <summary>
@@ -48,7 +78,8 @@ internal sealed class SsoAuthService(
     BanService banService,
     ILoginRedisStore redis,
     ILogger<SsoAuthService> logger,
-    CasAttemptGuard? casGuard = null)
+    CasAttemptGuard? casGuard = null,
+    IMfaChallengeCoordinator? mfaCoordinator = null)
 {
     /// <summary>唯一支持的学校。NWAFU 未随本次迁移，仍留在 Flask。</summary>
     private const string SupportedSchool = "xauat";
@@ -58,9 +89,11 @@ internal sealed class SsoAuthService(
     private const string BannedNowMessage = "账户已被暂时封禁，请在24小时后重试或联系管理员";
     private const string RateLimitedMessage = "登录失败次数过多，请在20分钟后重试";
     private const string AutoBanReason = "连续触发登录限流";
+    private const string PasswordExpiredMessage = "当前密码已过期，请先修改统一身份认证密码";
 
     public async Task<SsoAuthResult> LoginAsync(
-        string school, string username, string password, CancellationToken cancellationToken)
+        string school, string username, string password, CancellationToken cancellationToken,
+        MfaRequestOptions? mfaOptions = null)
     {
         var schoolKey = school.ToLowerInvariant();
         logger.LogInformation("登录请求: school={School}, username={Username}", schoolKey, username);
@@ -76,7 +109,7 @@ internal sealed class SsoAuthService(
         {
             logger.LogWarning("Redis 不可用，将执行完整登录流程（无缓存）");
             await GuardCasAsync(username);
-            return await FullLoginWithoutCacheAsync(username, password, cancellationToken);
+            return await FullLoginWithoutCacheAsync(username, password, mfaOptions, cancellationToken);
         }
 
         var passwordHash = PasswordEncryptor.Sha256Hex(password);
@@ -87,6 +120,11 @@ internal sealed class SsoAuthService(
         if (existingBan is not null)
         {
             return SsoAuthResult.Ban(BannedMessage, existingBan.Value.Info.Reason, existingBan.Value.Info.UnbanAt);
+        }
+
+        if (await redis.GetStringAsync(LoginCacheKeys.PasswordExpired(username, passwordHash)) is { Length: > 0 })
+        {
+            return SsoAuthResult.PasswordExpired(PasswordExpiredMessage);
         }
 
         var eduCookieKey = LoginCacheKeys.EduCookies(username, passwordHash);
@@ -109,7 +147,34 @@ internal sealed class SsoAuthService(
 
             // 复刻 Flask 的 cookies 语义：按调用新建 jar，不跨请求共享
             var jar = new XauatCookieJar();
-            var ssoResult = await ssoClient.ExchangeSsoTicketAsync(cachedSso, jar, cancellationToken);
+            var ssoResult = await ssoClient.ExchangeSsoTicketAsync(cachedSso, jar, cancellationToken, username);
+
+            if (ssoResult.Mfa is not null)
+            {
+                var mfa = await StartMfaAsync(
+                    ssoResult.Mfa, password, passwordHash, mfaOptions, cancellationToken);
+                if (mfa.Completed && mfa.Completion is not null)
+                {
+                    var mapped = MapCompletion(mfa.Completion);
+                    if (mapped is not null)
+                    {
+                        await redis.SetStringAsync(eduCookieKey, mapped.Value.EduCookie, LoginCacheTtl.EduCookies);
+                        if (!string.IsNullOrWhiteSpace(mapped.Value.SsoCookie))
+                            await redis.SetStringAsync(ssoCookieKey, mapped.Value.SsoCookie, LoginCacheTtl.SsoCookies);
+                        logger.LogInformation("用户 {Username} 完成二次认证，已缓存 cookies", username);
+                        return SsoAuthResult.Ok(mapped.Value.EduCookie);
+                    }
+                }
+
+                if (mfa.Challenge is not null) return SsoAuthResult.MfaRequired(mfa.Challenge);
+                return await MapMfaStartFailureAsync(mfa, username, passwordHash);
+            }
+
+            if (ssoResult.Failure == LoginFailureKind.PasswordExpired)
+            {
+                await HandlePasswordExpiredAsync(username, passwordHash);
+                return SsoAuthResult.PasswordExpired(PasswordExpiredMessage);
+            }
 
             if (ssoResult.Success && !string.IsNullOrEmpty(ssoResult.EduCookie))
             {
@@ -146,7 +211,37 @@ internal sealed class SsoAuthService(
         logger.LogInformation("用户 {Username} 执行完整登录流程", username);
 
         var loginJar = new XauatCookieJar();
-        var result = await ssoClient.LoginAsync(username, password, loginJar, cancellationToken);
+        var result = await ssoClient.LoginAsync(username, password, loginJar, cancellationToken, mfaOptions);
+
+        if (result.Mfa is not null)
+        {
+            await banService.ReleaseRateLimitSlotAsync(rateLimitKey);
+            var mfa = await StartMfaAsync(
+                result.Mfa, password, passwordHash, mfaOptions, cancellationToken);
+
+            if (mfa.Completed && mfa.Completion is not null)
+            {
+                var mapped = MapCompletion(mfa.Completion);
+                if (mapped is not null)
+                {
+                    await redis.SetStringAsync(eduCookieKey, mapped.Value.EduCookie, LoginCacheTtl.EduCookies);
+                    if (!string.IsNullOrWhiteSpace(mapped.Value.SsoCookie))
+                        await redis.SetStringAsync(ssoCookieKey, mapped.Value.SsoCookie, LoginCacheTtl.SsoCookies);
+                    logger.LogInformation("用户 {Username} 完成二次认证，已缓存 cookies", username);
+                    return SsoAuthResult.Ok(mapped.Value.EduCookie);
+                }
+            }
+
+            if (mfa.Challenge is not null) return SsoAuthResult.MfaRequired(mfa.Challenge);
+            return await MapMfaStartFailureAsync(mfa, username, passwordHash);
+        }
+
+        if (result.Failure == LoginFailureKind.PasswordExpired)
+        {
+            await banService.ReleaseRateLimitSlotAsync(rateLimitKey);
+            await HandlePasswordExpiredAsync(username, passwordHash);
+            return SsoAuthResult.PasswordExpired(PasswordExpiredMessage);
+        }
 
         if (!result.Success)
         {
@@ -168,7 +263,8 @@ internal sealed class SsoAuthService(
             logger.LogInformation("用户 {Username} 完整登录仅获得 ssoCookie，尝试换取 eduCookie", username);
 
             var exchangeJar = new XauatCookieJar();
-            var exchangeResult = await ssoClient.ExchangeSsoTicketAsync(result.SsoCookie, exchangeJar, cancellationToken);
+            var exchangeResult = await ssoClient.ExchangeSsoTicketAsync(
+                result.SsoCookie, exchangeJar, cancellationToken, username);
 
             if (exchangeResult.Success && !string.IsNullOrWhiteSpace(exchangeResult.EduCookie))
             {
@@ -201,6 +297,59 @@ internal sealed class SsoAuthService(
         return SsoAuthResult.Ok(string.IsNullOrEmpty(result.EduCookie) ? result.SsoCookie : result.EduCookie);
     }
 
+    private async Task<MfaStartOutcome> StartMfaAsync(
+        MfaSeed seed, string password, string passwordHash,
+        MfaRequestOptions? mfaOptions, CancellationToken cancellationToken)
+    {
+        if (mfaCoordinator is null)
+        {
+            return MfaStartOutcome.Fail(ReAuthStartFailure.Upstream, "二次认证暂不可用");
+        }
+
+        return await mfaCoordinator.StartAsync(seed, mfaOptions, password, passwordHash, cancellationToken);
+    }
+
+    private static (string EduCookie, string SsoCookie)? MapCompletion(ReAuthCompletion completion)
+    {
+        var eduCookie = string.Join("; ", completion.Cookies
+            .Where(cookie => string.Equals(cookie.Host, XauatConstants.StudentHost, StringComparison.OrdinalIgnoreCase))
+            .Select(cookie => $"{cookie.Name}={cookie.Value}"));
+        if (string.IsNullOrEmpty(eduCookie)) return null;
+
+        var ssoCookie = completion.Cookies
+            .LastOrDefault(cookie =>
+                string.Equals(cookie.Host, XauatConstants.AuthServerHost, StringComparison.OrdinalIgnoreCase) &&
+                cookie.Name == "CASTGC")
+            .Value ?? "";
+
+        return (eduCookie, ssoCookie);
+    }
+
+    private async Task HandlePasswordExpiredAsync(string username, string passwordHash)
+    {
+        if (!redis.IsAvailable) return;
+        await redis.SetStringAsync(
+            LoginCacheKeys.PasswordExpired(username, passwordHash), "1", LoginCacheTtl.PasswordExpired);
+        await banService.ClearUserCacheAsync(username, passwordHash);
+    }
+
+    private async Task<SsoAuthResult> MapMfaStartFailureAsync(
+        MfaStartOutcome outcome, string username, string passwordHash)
+    {
+        if (outcome.Failure == ReAuthStartFailure.PasswordExpired)
+        {
+            await HandlePasswordExpiredAsync(username, passwordHash);
+            return SsoAuthResult.PasswordExpired(PasswordExpiredMessage);
+        }
+
+        return outcome.Failure switch
+        {
+            ReAuthStartFailure.MethodUnsupported =>
+                SsoAuthResult.MfaMethodUnsupported(outcome.Message ?? "不支持的二次认证方式"),
+            _ => SsoAuthResult.MfaUnavailable(outcome.Message ?? "二次认证暂不可用")
+        };
+    }
+
     private async Task GuardCasAsync(string username)
     {
         if (casGuard is not null && await casGuard.AcquireAsync(CasAttemptGuard.XauatHost, username) is { } retry)
@@ -217,10 +366,29 @@ internal sealed class SsoAuthService(
     /// </para>
     /// </summary>
     private async Task<SsoAuthResult> FullLoginWithoutCacheAsync(
-        string username, string password, CancellationToken cancellationToken)
+        string username, string password, MfaRequestOptions? mfaOptions, CancellationToken cancellationToken)
     {
         var jar = new XauatCookieJar();
-        var result = await ssoClient.LoginAsync(username, password, jar, cancellationToken);
+        var result = await ssoClient.LoginAsync(username, password, jar, cancellationToken, mfaOptions);
+
+        if (result.Mfa is not null)
+        {
+            var passwordHash = PasswordEncryptor.Sha256Hex(password);
+            var mfa = await StartMfaAsync(result.Mfa, password, passwordHash, mfaOptions, cancellationToken);
+            if (mfa.Completed && mfa.Completion is not null)
+            {
+                var mapped = MapCompletion(mfa.Completion);
+                if (mapped is not null) return SsoAuthResult.Ok(mapped.Value.EduCookie);
+            }
+
+            if (mfa.Challenge is not null) return SsoAuthResult.MfaRequired(mfa.Challenge);
+            return await MapMfaStartFailureAsync(mfa, username, passwordHash);
+        }
+
+        if (result.Failure == LoginFailureKind.PasswordExpired)
+        {
+            return SsoAuthResult.PasswordExpired(PasswordExpiredMessage);
+        }
 
         if (!result.Success)
         {
@@ -231,7 +399,8 @@ internal sealed class SsoAuthService(
         if (string.IsNullOrWhiteSpace(result.EduCookie) && !string.IsNullOrWhiteSpace(result.SsoCookie))
         {
             var exchangeJar = new XauatCookieJar();
-            var exchangeResult = await ssoClient.ExchangeSsoTicketAsync(result.SsoCookie, exchangeJar, cancellationToken);
+            var exchangeResult = await ssoClient.ExchangeSsoTicketAsync(
+                result.SsoCookie, exchangeJar, cancellationToken, username);
             if (exchangeResult.Success && !string.IsNullOrWhiteSpace(exchangeResult.EduCookie))
             {
                 result = exchangeResult;

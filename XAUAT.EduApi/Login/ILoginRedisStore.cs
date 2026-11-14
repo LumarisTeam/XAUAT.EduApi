@@ -23,6 +23,12 @@ internal interface ILoginRedisStore
 
     Task<bool> SetStringAsync(string key, string value, TimeSpan ttl);
 
+    /// <summary>仅当键不存在时写入（Redis SET NX）。用于 MFA 会话锁与轮询节流。</summary>
+    Task<bool> SetIfNotExistsAsync(string key, string value, TimeSpan ttl);
+
+    /// <summary>原子读取并删除（Redis GETDEL）。键不存在返回 null。</summary>
+    Task<string?> GetDeleteAsync(string key);
+
     Task<long> IncrementAsync(string key);
 
     Task<long> DecrementAsync(string key);

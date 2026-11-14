@@ -1,6 +1,7 @@
 using EduApi.Data.Models;
 using XAUAT.EduApi.Exceptions;
 using XAUAT.EduApi.Interfaces;
+using XAUAT.EduApi.Login.Mfa;
 using XAUAT.EduApi.Services;
 
 namespace XAUAT.EduApi.Login;
@@ -37,7 +38,11 @@ internal sealed class SsoLoginService(
     /// <paramref name="language"/> 未被使用：CAS 与教务系统都不接受语言参数，
     /// 面向用户的文案一律由控制器按异常类型本地化生成。保留该参数是为了不改动控制器签名。
     /// </remarks>
-    public async Task<LoginResponse> LoginAsync(string username, string password, string language = "zh")
+    public Task<LoginResponse> LoginAsync(string username, string password, string language = "zh")
+        => LoginAsync(username, password, MfaRequestOptions.Default, language);
+
+    public async Task<LoginResponse> LoginAsync(
+        string username, string password, MfaRequestOptions options, string language = "zh")
     {
         // 测试账号：不碰上游、不碰 Redis、不计限流。
         // 短路留在这一层（而不是 SsoAuthService 里）有两个原因：一是与改造前的位置完全一致，
@@ -48,13 +53,27 @@ internal sealed class SsoLoginService(
             return testAccountResolver.CreateLoginResponse();
         }
 
-        var result = await authService.LoginAsync(School, username, password, CancellationToken.None);
+        var result = await authService.LoginAsync(School, username, password, CancellationToken.None, options);
 
         if (result.Banned)
         {
             logger.LogWarning("用户 {Username} 已被封禁，理由 {Reason}，解封时刻 {UnbanAt}",
                 username, result.BanReason, result.BanUntil);
             throw new AccountBannedException(result.Message, result.BanReason, result.BanUntil);
+        }
+
+        switch (result.Failure)
+        {
+            case SsoAuthFailureKind.MfaRequired:
+                throw result.Mfa is not null
+                    ? new MfaRequiredException(result.Mfa)
+                    : new MfaUnavailableException();
+            case SsoAuthFailureKind.MfaUnavailable:
+                throw new MfaUnavailableException();
+            case SsoAuthFailureKind.MfaMethodUnsupported:
+                throw new MfaMethodUnsupportedException(result.Message);
+            case SsoAuthFailureKind.PasswordExpired:
+                throw new PasswordExpiredException(ReAuthPageParser.PasswordChangeUrl);
         }
 
         if (!result.Success || string.IsNullOrEmpty(result.Cookies))

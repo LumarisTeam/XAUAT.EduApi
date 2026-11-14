@@ -29,8 +29,13 @@ public sealed class GraduateLoginService(
     /// </summary>
     public const string LoginUrl = "https://gmis.xauat.edu.cn/pyxx/sso/login";
 
-    public async Task<LoginResponse> LoginAsync(
+    public Task<LoginResponse> LoginAsync(
         string username, string password, CancellationToken cancellationToken = default)
+        => LoginAsync(username, password, MfaRequestOptions.Default, cancellationToken);
+
+    public async Task<LoginResponse> LoginAsync(
+        string username, string password, MfaRequestOptions options,
+        CancellationToken cancellationToken = default)
     {
         // 与本科生链路一致：测试账号不碰上游、不碰缓存。
         if (testAccountResolver.IsTestLogin(username, password))
@@ -47,7 +52,9 @@ public sealed class GraduateLoginService(
                 {
                     Url = LoginUrl,
                     Username = username,
-                    Password = password
+                    Password = password,
+                    MfaMethod = options.Method,
+                    TrustDevice = options.TrustDevice
                 },
                 cancellationToken);
         }

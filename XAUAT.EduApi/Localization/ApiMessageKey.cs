@@ -30,4 +30,21 @@ public static class ApiMessageKey
     public const string UnifiedAuthHostNotAllowed = nameof(UnifiedAuthHostNotAllowed);
     public const string UnifiedAuthNotCasProtected = nameof(UnifiedAuthNotCasProtected);
     public const string UnifiedAuthBlockedTarget = nameof(UnifiedAuthBlockedTarget);
+
+    // 二次认证（MFA / re-auth）
+    public const string MfaRequired = nameof(MfaRequired);
+    public const string MfaCodeRequired = nameof(MfaCodeRequired);
+    public const string MfaInvalidCode = nameof(MfaInvalidCode);
+    public const string MfaSessionExpired = nameof(MfaSessionExpired);
+    public const string MfaMethodUnsupported = nameof(MfaMethodUnsupported);
+    public const string MfaUnavailable = nameof(MfaUnavailable);
+    public const string MfaAttemptsExceeded = nameof(MfaAttemptsExceeded);
+    public const string MfaBusy = nameof(MfaBusy);
+    public const string MfaQrPending = nameof(MfaQrPending);
+    public const string MfaQrScanned = nameof(MfaQrScanned);
+    public const string MfaQrExpired = nameof(MfaQrExpired);
+    public const string MfaUseStatusEndpoint = nameof(MfaUseStatusEndpoint);
+    public const string MfaSendFailed = nameof(MfaSendFailed);
+    public const string MfaProtocolError = nameof(MfaProtocolError);
+    public const string PasswordExpired = nameof(PasswordExpired);
 }

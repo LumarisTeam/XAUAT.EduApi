@@ -1,5 +1,8 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 18
+VisualStudioVersion = 18.10.12201.205 stable
+MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "XAUAT.EduApi", "XAUAT.EduApi\XAUAT.EduApi.csproj", "{302BAAE5-214F-48BA-AD70-BCEBAC4CFA3F}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EduApi.Data", "EduApi.Data\EduApi.Data.csproj", "{4317ADA9-7B5B-46E5-8E2E-978E39C95B6F}"
@@ -60,5 +63,8 @@ Global
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{151AB277-2078-4023-B2D9-567029F35655} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {8BDA2FB0-4EE0-4DF3-BA21-1E98E868DB9D}
 	EndGlobalSection
 EndGlobal
