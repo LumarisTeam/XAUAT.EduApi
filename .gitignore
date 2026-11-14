@@ -16,3 +16,8 @@ logs/
 
 .DS_Store
 *.pyc
+
+# IDE / Visual Studio upgrade artifacts
+.vs/
+UpgradeLog*.htm
+Backup/

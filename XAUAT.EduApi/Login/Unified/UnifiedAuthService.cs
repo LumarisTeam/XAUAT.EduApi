@@ -167,6 +167,8 @@ internal sealed class UnifiedAuthService(
             throw new MfaMethodUnsupportedException(mfa.Message ?? "不支持的二次认证方式");
         }
 
+        logger.LogWarning("MFA 启动/完成失败：failure={Failure} message={Message}",
+            mfa.Failure, mfa.Message);
         throw new MfaUnavailableException();
     }
 

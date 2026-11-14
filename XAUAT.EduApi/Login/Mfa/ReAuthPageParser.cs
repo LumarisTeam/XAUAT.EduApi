@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 using XAUAT.EduApi.Exceptions;
 
@@ -52,10 +54,10 @@ internal static partial class ReAuthPageParser
         }
 
         var type = int.Parse(typeMatch.Groups[1].Value);
-        var service = serviceMatch.Groups[1].Value;
+        var service = UnescapeJsonString(serviceMatch.Groups[1].Value);
 
         var saltMatch = SaltRegex().Match(html);
-        var salt = saltMatch.Success ? saltMatch.Groups[1].Value : null;
+        var salt = saltMatch.Success ? UnescapeJsonString(saltMatch.Groups[1].Value) : null;
 
         var multifactorMatch = IsMultifactorRegex().Match(html);
         var isMultifactor = multifactorMatch.Success &&
@@ -69,7 +71,7 @@ internal static partial class ReAuthPageParser
         var ipAnomaly = anomalyMatch.Success ? int.Parse(anomalyMatch.Groups[1].Value) : 0;
 
         var otpRequiredMatch = OtpCodeRequiredRegex().Match(html);
-        var otpRequired = otpRequiredMatch.Success ? otpRequiredMatch.Groups[1].Value : null;
+        var otpRequired = otpRequiredMatch.Success ? UnescapeJsonString(otpRequiredMatch.Groups[1].Value) : null;
 
         var bindOtpMatch = IsBindOtpRegex().Match(html);
         bool? isBindOtp = bindOtpMatch.Success
@@ -77,14 +79,60 @@ internal static partial class ReAuthPageParser
             : null;
 
         var otpUrlMatch = OtpUrlRegex().Match(html);
-        var otpUrl = otpUrlMatch.Success ? otpUrlMatch.Groups[1].Value : null;
+        var otpUrl = otpUrlMatch.Success ? UnescapeJsonString(otpUrlMatch.Groups[1].Value) : null;
 
         var userIdMatch = ReAuthUserIdRegex().Match(html);
-        var userId = userIdMatch.Success ? userIdMatch.Groups[1].Value : null;
+        var userId = userIdMatch.Success ? UnescapeJsonString(userIdMatch.Groups[1].Value) : null;
 
         return new ReAuthPageParams(
             type, service, salt, isMultifactor, isSleepAccount, ipAnomaly,
             otpRequired, isBindOtp, otpUrl, userId);
+    }
+
+    /// <summary>
+    /// reAuthParams 是 JSON 对象字面量，URL 中的 <c>/</c> 常被写成 <c>\/</c>。
+    /// 正则只能拿到原始字符，必须按 JSON 字符串规则反转义；否则 <c>service</c> 会带着
+    /// 反斜杠进入 reAuthSubmit.do / combinedLogin.do，上游对非法参数直接返回 200 错误页
+    /// （表现为"combinedLogin.do 未返回微信扫码跳转"）。
+    /// </summary>
+    private static string UnescapeJsonString(string raw)
+    {
+        if (raw.IndexOf('\\') < 0) return raw;
+
+        var builder = new StringBuilder(raw.Length);
+        for (var i = 0; i < raw.Length; i++)
+        {
+            var current = raw[i];
+            if (current != '\\' || i + 1 >= raw.Length)
+            {
+                builder.Append(current);
+                continue;
+            }
+
+            var escaped = raw[++i];
+            switch (escaped)
+            {
+                case '"': builder.Append('"'); break;
+                case '\\': builder.Append('\\'); break;
+                case '/': builder.Append('/'); break;
+                case 'b': builder.Append('\b'); break;
+                case 'f': builder.Append('\f'); break;
+                case 'n': builder.Append('\n'); break;
+                case 'r': builder.Append('\r'); break;
+                case 't': builder.Append('\t'); break;
+                case 'u' when i + 4 < raw.Length &&
+                               ushort.TryParse(raw.AsSpan(i + 1, 4), NumberStyles.HexNumber,
+                                   CultureInfo.InvariantCulture, out var code):
+                    builder.Append((char)code);
+                    i += 4;
+                    break;
+                default:
+                    builder.Append('\\').Append(escaped);
+                    break;
+            }
+        }
+
+        return builder.ToString();
     }
 
     [GeneratedRegex(@"reAuthType[""']?\s*:\s*[""']?(\d+)", RegexOptions.IgnoreCase)]

@@ -39,6 +39,29 @@ public class ReAuthPageParserTests
     }
 
     [Fact]
+    public void Parse_JsonEscapedSlashesInService_AreUnescaped()
+    {
+        // 线上 reAuthParams 是 JSON 字面量，service 里的 / 被写成 \/。
+        // 不反转义会让 combinedLogin.do 的 success 参数非法，上游回 200 HTML 而不是微信 302。
+        const string page = """
+            <script>
+            var reAuthParams = {
+                "reAuthType": "8",
+                "service": "https:\/\/zhfwpt.xauat.edu.cn:8080\/logCas",
+                "isMultifactor": null,
+                "pwdEncryptSalt": "q1hVinmcu2i7fPyF"
+            };
+            </script>
+            """;
+
+        var parsed = ReAuthPageParser.Parse(page);
+
+        Assert.Equal(8, parsed.ReAuthType);
+        Assert.Equal("https://zhfwpt.xauat.edu.cn:8080/logCas", parsed.Service);
+        Assert.Equal("q1hVinmcu2i7fPyF", parsed.EncryptSalt);
+    }
+
+    [Fact]
     public void Parse_MissingTypeOrService_ThrowsProtocolException()
     {
         Assert.Throws<MfaProtocolException>(() =>

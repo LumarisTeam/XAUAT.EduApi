@@ -72,6 +72,10 @@ internal sealed class MfaChallengeCoordinator(
             null,
             null);
 
+        logger.LogInformation(
+            "MFA 启动：kind={Kind} requested={Requested} pageType={PageType} service={Service}",
+            seed.Kind, requested, page.ReAuthType, page.Service);
+
         var start = await reAuthHandler.StartAsync(
             seed.Kind,
             seed.Username,
@@ -87,6 +91,9 @@ internal sealed class MfaChallengeCoordinator(
 
         if (!start.Success)
         {
+            logger.LogWarning(
+                "MFA 启动失败：failure={Failure} message={Message} retryAfter={RetryAfter}",
+                start.Failure, start.Message, start.RetryAfterSeconds);
             return MfaStartOutcome.Fail(start.Failure, start.Message, start.RetryAfterSeconds);
         }
 
@@ -106,6 +113,13 @@ internal sealed class MfaChallengeCoordinator(
                 client: client,
                 allowHop: AllowHopFor(effective.Kind),
                 cancellationToken: cancellationToken);
+
+            if (!completion.Success)
+            {
+                logger.LogWarning(
+                    "MFA 完成失败（type 2）：failure={Failure} message={Message}",
+                    completion.Failure, completion.Message);
+            }
 
             return completion.Success
                 ? MfaStartOutcome.Done(completion)

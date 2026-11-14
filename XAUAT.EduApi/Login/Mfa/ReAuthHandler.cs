@@ -508,6 +508,9 @@ internal sealed partial class ReAuthHandler(
 
         if (!IsRedirect(response.StatusCode) || response.Headers.Location is null)
         {
+            logger.LogWarning(
+                "combinedLogin.do 未返回微信扫码跳转：HTTP {Status}，Location={Location}",
+                (int)response.StatusCode, response.Headers.Location);
             return ReAuthStartResult.Fail(ReAuthStartFailure.Protocol, "combinedLogin.do 未返回微信扫码跳转");
         }
 
@@ -712,7 +715,19 @@ internal sealed partial class ReAuthHandler(
     }
 
     private static Uri AuthUrl(Uri loginUrl, string path)
-        => new(loginUrl.GetLeftPart(UriPartial.Authority) + path);
+    {
+        var origin = loginUrl.GetLeftPart(UriPartial.Authority);
+
+        // XAUAT 的登录页是 HTTP，但 combinedLogin.do/callback 等 re-auth 端点会先 302 到 HTTPS。
+        // 如果继续用 HTTP origin，StartQrAsync 看到的第一跳是 authserver→HTTPS，而不是
+        // 微信 qrconnect，会被误判为“不是微信跳转”。统一走 authserver 的 HTTPS origin。
+        if (string.Equals(loginUrl.Host, XauatConstants.AuthServerHost, StringComparison.OrdinalIgnoreCase))
+        {
+            origin = "https://" + loginUrl.Host;
+        }
+
+        return new Uri(origin + path);
+    }
 
     private static bool IsReAuthOrImproveInfo(Uri uri)
         => ReAuthPageParser.IsReAuthUrl(uri) || ReAuthPageParser.IsPasswordExpiredUrl(uri);

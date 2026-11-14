@@ -9,6 +9,7 @@ namespace XAUAT.EduApi.Tests.Login.Mfa;
 public class ReAuthHandlerTests
 {
     private const string AuthBase = "http://authserver.xauat.edu.cn";
+    private const string AuthSecure = "https://authserver.xauat.edu.cn";
     private const string LoginUrl =
         AuthBase + "/authserver/login?service=https%3A%2F%2Fswjw.xauat.edu.cn%2Fstudent%2Fsso%2Flogin";
     private const string Service = "https://swjw.xauat.edu.cn/student/sso/login";
@@ -26,7 +27,7 @@ public class ReAuthHandlerTests
     private static void ScriptTicketFlow(ScriptedHttpHandler http, string submitJson)
     {
         http.OnPostStartingWith(
-            AuthBase + "/authserver/reAuthCheck/reAuthSubmit.do",
+            AuthSecure + "/authserver/reAuthCheck/reAuthSubmit.do",
             () => FakeResponses.Json(submitJson));
         http.OnGetStartingWith(
             AuthBase + "/authserver/login?service=",
@@ -97,7 +98,7 @@ public class ReAuthHandlerTests
     {
         var (handler, http) = Create();
         http.OnPostStartingWith(
-            AuthBase + "/authserver/reAuthCheck/reAuthSubmit.do",
+            AuthSecure + "/authserver/reAuthCheck/reAuthSubmit.do",
             () => FakeResponses.Json("{\"msg\":\"认证失败\",\"code\":\"reAuth_failed\"}"));
 
         var result = await handler.CompleteAsync(
@@ -114,10 +115,10 @@ public class ReAuthHandlerTests
     {
         var (handler, http) = Create();
         http.OnPostStartingWith(
-            AuthBase + "/authserver/reAuthCheck/changeReAuthType.do",
+            AuthSecure + "/authserver/reAuthCheck/changeReAuthType.do",
             () => FakeResponses.Json("{\"code\":\"1\",\"data\":{\"reAuthType\":\"4\",\"reAuthUserNameInput\":\"刘家林\"}}"));
         http.OnPostStartingWith(
-            AuthBase + "/authserver/dynamicCode/getDynamicCodeByReauth.do",
+            AuthSecure + "/authserver/dynamicCode/getDynamicCodeByReauth.do",
             () => FakeResponses.Json("{\"res\":\"wechat_success\",\"returnMessage\":\"验证码已发送成功\"}"));
 
         var page = new ReAuthPageParams(10, Service, Salt, false, true, 0, null, null, null, "20240001");
@@ -141,10 +142,10 @@ public class ReAuthHandlerTests
     {
         var (handler, http) = Create();
         http.OnPostStartingWith(
-            AuthBase + "/authserver/reAuthCheck/changeReAuthType.do",
+            AuthSecure + "/authserver/reAuthCheck/changeReAuthType.do",
             () => FakeResponses.Json("{\"code\":\"1\",\"data\":{\"reAuthType\":\"8\"}}"));
         http.OnGetStartingWith(
-            AuthBase + "/authserver/combinedLogin.do",
+            AuthSecure + "/authserver/combinedLogin.do",
             () => FakeResponses.Redirect(
                 "https://open.weixin.qq.com/connect/qrconnect?appid=wx123&redirect_uri=https%3A%2F%2Fauthserver.xauat.edu.cn%2Fauthserver%2Fcallback&scope=snsapi_login&state=STATE123"));
         http.OnGetStartingWith(
@@ -165,6 +166,8 @@ public class ReAuthHandlerTests
         Assert.Equal("UUID12345", result.Seed.QrUuid);
         Assert.Equal("STATE123", result.Seed.QrState);
         Assert.False(string.IsNullOrEmpty(result.Seed.QrImageBase64));
+        Assert.Contains(http.Sent, request =>
+            request.Url.StartsWith(AuthSecure + "/authserver/combinedLogin.do", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -175,7 +178,7 @@ public class ReAuthHandlerTests
             "https://lp.open.weixin.qq.com/connect/l/qrconnect",
             () => FakeResponses.Html("window.wx_errcode=405;window.wx_code='CODE123';"));
         http.OnGetStartingWith(
-            AuthBase + "/authserver/callback?code=CODE123&state=STATE123",
+            AuthSecure + "/authserver/callback?code=CODE123&state=STATE123",
             () => FakeResponses.Redirect(
                 AuthBase + "/authserver/login?service=https%3A%2F%2Fswjw.xauat.edu.cn%2Fstudent%2Fsso%2Flogin"));
         http.OnGetStartingWith(
