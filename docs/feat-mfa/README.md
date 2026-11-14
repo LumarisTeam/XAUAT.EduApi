@@ -178,9 +178,10 @@ GET /authserver/login?service=<service>
 API 只允许跳转到硬编码的 `open.weixin.qq.com` / `lp.open.weixin.qq.com`，并校验 `state` 来自
 `combinedLogin.do` 的 302；未知 302 host 一律按协议错误处理。
 
-> **HTTPS origin**：XAUAT 的登录页是 HTTP，但 `combinedLogin.do` / `callback` 会先 302 到 HTTPS。
-> 请求 re-auth 端点时必须使用 `https://authserver.xauat.edu.cn`，否则第一跳是 authserver→HTTPS，
-> 会被误判成「不是微信跳转」。
+> **HTTPS 优先**：2026-11 实测生产出网到 authserver 的 **80 端口会超时、443 正常**；
+> 代码默认使用 `https://authserver.xauat.edu.cn`，并会把统一认证发现/回跳链里的 authserver
+> HTTP URL 升级为 HTTPS。re-auth 端点（`combinedLogin.do` / `callback`）本身也必须走 HTTPS，
+> 否则第一跳是 authserver→HTTPS，会被误判成「不是微信跳转」。
 
 ### 2.7 密码过期
 
@@ -491,6 +492,21 @@ dotnet run --project XAUAT.EduApi
   测试时改用 CAS 登录页 + `service` 参数作为 `url`。
 - **生产真实端到端**需部署后按验证矩阵执行；本机无法完全复现生产出口 IP 的 `ipAnomaly`。
 - **缓存检测延迟**：长期命中缓存且从不触发完整登录/换票时，API 不会主动知道密码过期。
+
+### 7.4 生产网络：authserver 80 端口不可达（2026-11-14）
+
+生产 `https://xauatapi.xauat.site` 实测：
+
+- `http://authserver.xauat.edu.cn` 从生产出网 **30 秒超时**，`https://authserver.xauat.edu.cn` 正常；
+- 其他 `*.edu.cn`（清华、西建大主站）快速可达，说明不是整体出网故障；
+- `/v1/login` 把上游失败映射为「用户名或密码错误」，表现为快速 401；
+  `/v1/login/unified` 表现为 502；
+- 用 `https://authserver.xauat.edu.cn/authserver/login?...` 作为 `url` 的统一认证在生产已成功
+  （200/code 0，拿到 swjw cookie）。
+
+修复：`XauatConstants.AuthServerUrl` 改为 HTTPS；`XauatConstants.SecureAuthServer` 在标准链路
+重定向与统一认证发现/回跳的每一跳把 authserver HTTP URL 升级为 HTTPS。部署后需重新验证
+`/v1/login` 与 `/v1/login/unified`。
 
 ---
 

@@ -18,7 +18,7 @@ namespace XAUAT.EduApi.Tests.Login.UnifiedAuth;
 public class UnifiedSsoClientTests
 {
     private const string TargetUrl = "https://swjw.xauat.edu.cn/student/index";
-    private const string AuthServerPrefix = "http://authserver.xauat.edu.cn/authserver/login";
+    private const string AuthServerPrefix = "https://authserver.xauat.edu.cn/authserver/login";
     private const string CallbackUrl = "https://swjw.xauat.edu.cn/student/sso/login?ticket=ST-1";
     private const string Username = "alice";
     private const string Password = "my-password";
@@ -171,6 +171,25 @@ public class UnifiedSsoClientTests
     }
 
     // ================================================================ 正常链路
+
+    [Fact]
+    public async Task Login_UpgradesHttpAuthServerUrlToHttps()
+    {
+        const string httpLogin =
+            "http://authserver.xauat.edu.cn/authserver/login?service=https%3A%2F%2Fswjw.xauat.edu.cn%2Fstudent%2Fsso%2Flogin";
+        _handler
+            .OnGet(TargetUrl, () => FakeResponses.Redirect(httpLogin))
+            .OnGetStartingWith(AuthServerPrefix, () => FakeResponses.Html(LoginPageHtml, HttpStatusCode.OK, "JSESSIONID=node1"))
+            .OnPostStartingWith(AuthServerPrefix, () => FakeResponses.Redirect(CallbackUrl, "CASTGC=TGT-1234; Path=/"))
+            .OnGet(CallbackUrl, () => FakeResponses.Html(LandingPageHtml, HttpStatusCode.OK, "__pstsid__=abc123; Path=/"));
+
+        var outcome = await LoginAsync();
+
+        Assert.True(outcome.Success);
+        Assert.StartsWith(AuthServerPrefix, outcome.AuthServerUrl);
+        Assert.DoesNotContain(_handler.Sent, request =>
+            request.Url.StartsWith("http://authserver", StringComparison.OrdinalIgnoreCase));
+    }
 
     [Fact]
     public async Task Login_ShouldDiscoverAuthServerAndReturnLandingCookie()

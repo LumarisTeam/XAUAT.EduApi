@@ -12,12 +12,32 @@ internal static class XauatConstants
 {
     /// <summary>
     /// 统一认证入口。
-    /// <b>注意是明文 HTTP</b>——上游如此，不要"顺手"改成 https（证书与端口都未必对得上）。
+    /// <para>
+    /// 2026-11 实测：生产出网到 authserver 的 <b>80 端口会超时</b>，443 正常；HTTP/HTTPS
+    /// 的登录页与 POST 行为一致，因此默认走 HTTPS。上游仍然接受 HTTP，但不要再把它作为
+    /// 登录入口——否则生产环境会卡在 30 秒超时后报「用户名或密码错误」。
+    /// </para>
     /// </summary>
-    public const string AuthServerUrl = "http://authserver.xauat.edu.cn/authserver/login";
+    public const string AuthServerUrl = "https://authserver.xauat.edu.cn/authserver/login";
 
     /// <summary>认证服务器主机名，用于 cookie 归属。</summary>
     public const string AuthServerHost = "authserver.xauat.edu.cn";
+
+    /// <summary>
+    /// 把 authserver 的 HTTP URL 升级为 HTTPS；其它 host 或已经是 HTTPS 的原样返回。
+    /// 仅影响 XAUAT 认证服务器，通用统一认证访问其他学校时保持原协议。
+    /// </summary>
+    public static Uri SecureAuthServer(Uri uri)
+    {
+        if (!uri.IsAbsoluteUri ||
+            !string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(uri.Host, AuthServerHost, StringComparison.OrdinalIgnoreCase))
+        {
+            return uri;
+        }
+
+        return new UriBuilder(uri) { Scheme = Uri.UriSchemeHttps, Port = -1 }.Uri;
+    }
 
     /// <summary>CAS 登录后要跳转的目标服务（教务门户的 SSO 入口）。</summary>
     public const string ServiceUrl = "https://swjw.xauat.edu.cn/student/sso/login";
